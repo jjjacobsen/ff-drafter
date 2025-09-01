@@ -1,0 +1,30 @@
+[project]
+name = "ff-drafter"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "espn-api>=0.45.1",
+    "pandas>=2.3.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.11",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort (import sorting)
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+    "N",   # pep8-naming (naming conventions)
+    "S",   # flake8-bandit (security issues)
+    "RUF", # Ruff-specific rules
+    "SIM", # flake8-simplify
+    "PTH", # flake8-use-pathlib
+]
