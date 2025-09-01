@@ -10,6 +10,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "ipython>=9.5.0",
     "ruff>=0.12.11",
 ]
 
