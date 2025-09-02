@@ -16,6 +16,23 @@ import pandas as pd
 
 
 DEFAULT_BUDGET = 200  # per team, used when auto-creating a team
+MY_TEAM_NAME = "Me"
+
+# Caps to avoid extreme swings
+CAP_MIN = 0.6
+CAP_MAX = 1.3
+
+# Need-based multipliers (applied for my team only)
+NEED_MULT_HIGH = 1.10  # need base slot
+NEED_MULT_MED = 1.02  # only flex remaining
+NEED_MULT_LOW = 0.85  # base + flex filled
+
+# Supply/Inflation tuning
+SUPPLY_WEIGHT = 0.25  # scarcity factor contribution when base need
+SUPPLY_WEIGHT_MED = 0.10
+TIER_GAP_WEIGHT = 0.5  # converts price gap ratio into factor
+INFLATION_MIN = 0.85
+INFLATION_MAX = 1.15
 
 
 @dataclass
@@ -268,6 +285,160 @@ def print_team_summary(teams: dict[str, Team]) -> None:
     print()
 
 
+# --- Pricing Engine ---
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _requirements() -> dict[str, int]:
+    # FLEX is separate and satisfied by RB/WR/TE overflow
+    return {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "D/ST": 1, "K": 1, "FLEX": 1}
+
+
+def _flex_used(roster: dict[str, int], req: dict[str, int]) -> int:
+    overflow = 0
+    for pos in ("RB", "WR", "TE"):
+        have = roster.get(pos, 0)
+        overflow += max(0, have - req.get(pos, 0))
+    return min(req.get("FLEX", 0), overflow)
+
+
+def _need_level(team: Team, pos: str, req: dict[str, int]) -> str:
+    pos = pos.upper()
+    have = team.roster.get(pos, 0)
+    base_need = max(0, req.get(pos, 0) - have)
+    if base_need > 0:
+        return "high"
+    flex_left = req.get("FLEX", 0) - _flex_used(team.roster, req)
+    if pos in {"RB", "WR", "TE"} and flex_left > 0:
+        return "med"
+    return "low"
+
+
+def _inflation_factor(
+    teams: dict[str, Team],
+    df: pd.DataFrame,
+    drafted: set[str],
+    v0_total: float | None,
+) -> float:
+    # Money remaining vs remaining base value, scaled to initial ratio
+    remaining_value = float(df.loc[~df["name"].isin(drafted), "salary"].sum())
+    if remaining_value <= 0:
+        return 1.0
+
+    if not teams:
+        return 1.0
+
+    mt = float(sum(t.remaining for t in teams.values()))
+    m0 = float(sum(t.budget for t in teams.values()))
+    if m0 <= 0 or not v0_total:
+        return 1.0
+
+    raw = (mt / remaining_value) * (v0_total / m0)
+    return _clamp(raw, INFLATION_MIN, INFLATION_MAX)
+
+
+def _supply_factor(
+    df: pd.DataFrame,
+    drafted: set[str],
+    pos: str,
+    need_level: str,
+    pos_initial_counts: dict[str, int],
+) -> float:
+    pos = pos.upper()
+    init_cnt = pos_initial_counts.get(pos)
+    if not init_cnt or init_cnt <= 0:
+        return 1.0
+
+    remaining_cnt = int(
+        df.loc[(df["position"].str.upper() == pos) & (~df["name"].isin(drafted))].shape[
+            0
+        ]
+    )
+    scarcity = max(0.0, 1.0 - (remaining_cnt / init_cnt))
+    if need_level == "high":
+        return 1.0 + scarcity * SUPPLY_WEIGHT
+    if need_level == "med":
+        return 1.0 + scarcity * SUPPLY_WEIGHT_MED
+    return 1.0
+
+
+def _tier_gap_factor(
+    df: pd.DataFrame,
+    drafted: set[str],
+    pos: str,
+    player_salary: int,
+    player_name: str,
+) -> float:
+    # Mild boost if next-best at position is a big drop
+    pos_mask = df["position"].str.upper() == pos.upper()
+    remaining = df.loc[
+        pos_mask & (~df["name"].isin(drafted)), ["name", "salary"]
+    ].copy()
+    if remaining.empty:
+        return 1.0
+    remaining.sort_values("salary", ascending=False, inplace=True)
+    names = remaining["name"].tolist()
+    try:
+        idx = names.index(player_name)
+    except ValueError:
+        # If player already drafted or not found, no effect
+        return 1.0
+    cur = max(1, int(player_salary))
+    if idx + 1 >= len(remaining):
+        return 1.0
+    nxt = int(remaining.iloc[idx + 1]["salary"]) or 0
+    gap_ratio = max(0.0, (cur - nxt) / float(cur))
+    return 1.0 + min(0.2, gap_ratio * TIER_GAP_WEIGHT)
+
+
+def adjusted_salary(
+    row: pd.Series,
+    df: pd.DataFrame,
+    teams: dict[str, Team],
+    drafted: set[str],
+    v0_total: float | None,
+    pos_initial_counts: dict[str, int],
+    my_team_name: str = MY_TEAM_NAME,
+) -> int:
+    base = int(row.get("salary", 0) or 0)
+    pos = str(row.get("position", "")).upper()
+    name = str(row.get("name", ""))
+
+    mult = 1.0
+
+    # Inflation
+    mult *= _inflation_factor(teams, df, drafted, v0_total)
+
+    # Ensure my team exists for need eval
+    my_team = teams.get(my_team_name)
+    if my_team is None:
+        my_team = Team(name=my_team_name)
+        teams[my_team_name] = my_team
+
+    # Need factor
+    req = _requirements()
+    level = _need_level(my_team, pos, req)
+    if level == "high":
+        mult *= NEED_MULT_HIGH
+    elif level == "med":
+        mult *= NEED_MULT_MED
+    else:
+        mult *= NEED_MULT_LOW
+
+    # Supply factor (thinness)
+    mult *= _supply_factor(df, drafted, pos, level, pos_initial_counts)
+
+    # Tier-gap factor (mild)
+    mult *= _tier_gap_factor(df, drafted, pos, base, name)
+
+    # Final clamp and int conversion
+    mult = _clamp(mult, CAP_MIN, CAP_MAX)
+    return round(base * mult)
+
+
 def main():
     print("Starting new draft. Reading salaries.csv …")
     try:
@@ -278,6 +449,12 @@ def main():
 
     drafted: set[str] = set()
     teams: dict[str, Team] = {}
+
+    # Precompute engine baselines
+    v0_total: float = float(df["salary"].sum())
+    pos_initial_counts: dict[str, int] = (
+        df["position"].str.upper().value_counts().to_dict()
+    )
     # history items: (player_name, position, price, team_name)
     history: list[tuple[str, str, int, str]] = []
 
@@ -329,7 +506,16 @@ def main():
 
         print(f"Selected: {player_name} ({player_pos})")
         if suggested is not None:
-            print(f"Suggested salary: ${suggested}")
+            adj = adjusted_salary(
+                sel,
+                df,
+                teams,
+                drafted,
+                v0_total,
+                pos_initial_counts,
+                MY_TEAM_NAME,
+            )
+            print(f"Suggested salary: ${adj} (base ${suggested})")
         else:
             print("Suggested salary: n/a")
 
