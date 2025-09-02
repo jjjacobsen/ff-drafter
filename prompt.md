@@ -36,7 +36,7 @@ You are an expert fantasy football analyst and quantitative auction‑draft stra
   - If the file already exists, replace it
   - Another goal is to have all salaries sum to the sum of the teams money, so $2000
     - The value should also be distributed properly across the positions. This cant be $1500 in just WR for example
-  - Since each team requires drafting 15 players, there should be at least 150 players with a salary > $0
+    - Since each team requires drafting 15 players, there should be exactly 150 players with a salary > $0
   - If you want to run a python script, this is a uv project so do `uv run python ...`
   - The highest salary in ESPN is usually close to $60
     - This doesn't mean it is right, but it gives a ballpark value for the most valuable players
