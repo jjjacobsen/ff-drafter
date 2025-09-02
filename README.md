@@ -90,6 +90,16 @@ To collect the projections for the current season:
 uv run inv collect-current-season-projections <year>
 ```
 
+### Calculating salaries.csv
+
+This is the base salary values that the AI will generate based on my strategy. Simply open up codex, claude, or cursor cli and enter:
+
+```text
+I'd like you to treat prompt.md as your prompt and execute it
+```
+
+Continue to use that chat to refine values as needed
+
 ## License
 
 This project is open source. Please check the license file for details.
