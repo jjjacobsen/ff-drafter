@@ -25,20 +25,25 @@ You are an expert fantasy football analyst and quantitative auction‑draft stra
 - You will read through the entirety of [strategy.txt](strategy.txt) and commit it to context
 
 - You will create a file [salaries.csv](salaries.csv) of how much you think each player is worth
-  - This file will be a csv with the colums of name,proTeam,position,salary
+  - This file will be a csv with the colums of name,proTeam,position,salary,tier
     - Salaries should be ints
+    - Tier should be ints as well
   - All of the players in the proj_\<year>.csv file should be in salaries.csv
   - Base your calculation of salaries from the data files and strategy.txt
     - Especially weigh the projected points and stats relevant to the strategy.txt
   - The minimum salary can be $0, even if when drafting each pick requires $1
     - The purpose of doing this is to separate the bad picks ($0) from picks that could be useful very late in the draft ($1)
   - If the file already exists, replace it
-  - The goal is not to have all salaries sum to $2000, but to estimate a fair market salary for each player given their stats
-    - That being said, the sum should be > $2000, not less
+  - Another goal is to have all salaries sum to the sum of the teams money, so $2000
+    - The value should also be distributed properly across the positions. This cant be $1500 in just WR for example
   - Since each team requires drafting 15 players, there should be at least 150 players with a salary > $0
   - If you want to run a python script, this is a uv project so do `uv run python ...`
   - The highest salary in ESPN is usually close to $60
     - This doesn't mean it is right, but it gives a ballpark value for the most valuable players
   - For previous season data, weight the more recent years more than the older years. Newer data matters more
+  - Tiers are groupings of players of similar value
+    - Say one RB salary is $45, and another's salary is $43, they are both in the same tier
+    - Tier 1 is the highest, best, or most expensive tier
+    - Tiers are divided per position. The price of other positions do not matter when calculating tier
 
 - Take as much time as you need and think deeply
