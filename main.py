@@ -21,6 +21,7 @@ MY_TEAM_NAME = "me"
 # Caps to avoid extreme swings
 CAP_MIN = 0.6
 CAP_MAX = 1.3
+MAX_PLAYER_SALARY = 65  # hard cap per-player suggestion
 
 # Need-based multipliers (applied for my team only)
 NEED_MULT_HIGH = 1.10  # need base slot
@@ -33,6 +34,7 @@ SUPPLY_WEIGHT_MED = 0.10
 TIER_GAP_WEIGHT = 0.5  # converts price gap ratio into factor
 INFLATION_MIN = 0.85
 INFLATION_MAX = 1.15
+POS_HARD_CAPS: dict[str, int] = {"D/ST": 1, "K": 1}
 
 
 @dataclass
@@ -396,13 +398,19 @@ def _tier_scarcity_factor(
 ) -> float:
     # If I have a high (or medium) need and there are very few remaining
     # players in this tier for this position, nudge the price up a bit.
-    if tier_value is None or tier_value == "" or pd.isna(tier_value):
+    if (
+        tier_value is None
+        or tier_value == ""
+        or pd.isna(tier_value)
+        or "tier" not in df.columns
+    ):
         return 1.0
     pos_up = pos.upper()
+    tier_col = df["tier"].astype(str)
     rem = df.loc[
         (df["position"].str.upper() == pos_up)
         & (~df["name"].isin(drafted))
-        & (df.get("tier").astype(str) == str(tier_value)),
+        & (tier_col == str(tier_value)),
         ["name"],
     ]
     remaining_in_tier = int(rem.shape[0])
@@ -459,9 +467,48 @@ def adjusted_salary(
     # Tier scarcity factor (for my need)
     mult *= _tier_scarcity_factor(df, drafted, pos, tier_value, level)
 
-    # Final clamp and int conversion
+    # Final clamp on multiplier
     mult = _clamp(mult, CAP_MIN, CAP_MAX)
-    return round(base * mult)
+
+    # Start with base suggestion
+    suggestion = round(base * mult)
+
+    # Hard cap per player (overall)
+    suggestion = min(suggestion, MAX_PLAYER_SALARY)
+
+    # Position-specific hard caps (e.g., D/ST and K at $1)
+    pos_cap = POS_HARD_CAPS.get(pos)
+    if pos_cap is not None:
+        suggestion = min(suggestion, pos_cap)
+
+    # Never suggest more than current remaining budget
+    suggestion = min(suggestion, my_team.remaining)
+
+    # Budget guardrails for my team: ensure we keep at least $1 per remaining slot
+    # after buying this player at the suggested price.
+    req = _requirements()
+    roster_after = dict(my_team.roster)
+    roster_after[pos] = roster_after.get(pos, 0) + 1
+
+    # Count remaining required base slots after this hypothetical pick
+    remaining_base_slots = 0
+    for p, need in req.items():
+        if p == "FLEX":
+            continue
+        remaining_base_slots += max(0, need - roster_after.get(p, 0))
+    # Remaining flex slots
+    remaining_flex = max(0, req.get("FLEX", 0) - _flex_used(roster_after, req))
+    min_reserved_other = remaining_base_slots + remaining_flex
+
+    # Ensure we don't suggest more than we can afford
+    # while keeping $1 for each remaining slot
+    affordable_cap = my_team.remaining - min_reserved_other
+    if affordable_cap >= 0:
+        suggestion = min(suggestion, affordable_cap)
+    # Keep suggestion at least $1 when possible
+    suggestion = max(1, suggestion)
+
+    return suggestion
 
 
 def main():
