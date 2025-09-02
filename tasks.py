@@ -7,20 +7,29 @@ from espn_api.football import League
 from invoke import task
 
 
-def collect_prev_season_data(year: int):
-    """Collect previous season data for all players and return as DataFrame."""
-    league = League(
+def _create_league(year: int):
+    """Create ESPN League instance with environment variables."""
+    return League(
         league_id=os.getenv("LEAGUE_ID"),
         year=year,
         espn_s2=os.getenv("ESPN_S2"),
         swid=os.getenv("SWID"),
     )
 
+
+def _collect_all_players(league):
+    """Collect all players from league teams and free agents."""
     players = {p.playerId: p for t in league.teams for p in t.roster}
     # add everyone else from the FA pool (big size pulls "all")
     for p in league.free_agents(size=2000):  # ESPN usually <1500 players
         players.setdefault(p.playerId, p)
-    players = list(players.values())
+    return list(players.values())
+
+
+def collect_prev_season_data(year: int):
+    """Collect previous season data for all players and return as DataFrame."""
+    league = _create_league(year)
+    players = _collect_all_players(league)
 
     player_data = []
     for p in players:
@@ -115,6 +124,34 @@ def collect_prev_season_data(year: int):
     return df
 
 
+def collect_current_season_projections(year: int):
+    """Collect current season projections for all players and return as DataFrame."""
+    league = _create_league(year)
+    players = _collect_all_players(league)
+
+    player_data = []
+    for p in players:
+        player_row = {
+            "playerId": p.playerId,
+            "name": p.name,
+            "proTeam": p.proTeam,
+            "position": p.position,
+            "proj_points": p.projected_points,
+        }
+        if player_row["proTeam"] == "None":
+            continue
+        if player_row["proj_points"] == 0:
+            continue
+        player_data.append(player_row)
+
+    df = pd.DataFrame(player_data)
+
+    proj_points_path = Path("proj_points.csv")
+    df.to_csv(proj_points_path, index=False)
+
+    return df
+
+
 @task(name="collect-prev-season-data")
 def collect_prev_season_data_task(ctx, year):
     """Collect previous season data for all players and save to CSV."""
@@ -132,3 +169,25 @@ def collect_prev_season_data_task(ctx, year):
     print(f"Collecting data for {year_int}...")
     df = collect_prev_season_data(year_int)
     print(f"Successfully collected data for {len(df)} players from {year_int} season")
+
+
+@task(name="collect-current-season-projections")
+def collect_current_season_projections_task(ctx, year):
+    """Collect current season projections for all players and save to CSV."""
+    load_dotenv()
+
+    try:
+        year_int = int(year)
+    except ValueError:
+        print(
+            f"Error: '{year}' is not a valid year. "
+            "Please provide a 4-digit year (e.g., 2025)"
+        )
+        return
+
+    print(f"Collecting current season projections for {year_int}...")
+    df = collect_current_season_projections(year_int)
+    print(
+        f"Successfully collected projections for {len(df)} "
+        f"players from {year_int} season"
+    )
