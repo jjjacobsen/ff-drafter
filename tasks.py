@@ -145,7 +145,7 @@ def collect_prev_season_data_task(ctx, year):
     df = collect_prev_season_data(year_int)
 
     # Create prev_seasons directory if it doesn't exist
-    prev_seasons_dir = Path("prev_seasons")
+    prev_seasons_dir = Path("data")
     prev_seasons_dir.mkdir(exist_ok=True)
 
     # Write DataFrame to CSV
@@ -173,10 +173,14 @@ def collect_current_season_projections_task(ctx, year):
     print(f"Collecting current season projections for {year_int}...")
     df = collect_current_season_projections(year_int)
 
+    # Create prev_seasons directory if it doesn't exist
+    prev_seasons_dir = Path("data")
+    prev_seasons_dir.mkdir(exist_ok=True)
+
     # Write DataFrame to CSV
-    proj_points_path = Path("proj_points.csv")
-    df.to_csv(proj_points_path, index=False)
-    print(f"Data saved to: {proj_points_path}")
+    csv_path = prev_seasons_dir / f"proj_{year_int}.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"\nData saved to: {csv_path}")
 
     print(
         f"Successfully collected projections for {len(df)} "
