@@ -74,6 +74,14 @@ Once configured, run the application:
 uv run python main.py
 ```
 
+### Collecting Previous Season Data
+
+To collect previous season data for analysis:
+
+```bash
+uv run inv collect-prev-season-data <year>
+```
+
 ## License
 
 This project is open source. Please check the license file for details.

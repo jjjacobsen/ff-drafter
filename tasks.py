@@ -86,6 +86,23 @@ def collect_prev_season_data(year: int):
 
     df = pd.DataFrame(player_data)
 
+    # Filter out players where posRank is not > 0 (handles 0, [], etc.)
+    initial_count = len(df)
+
+    def is_valid_pos_rank(pos_rank):
+        """Check if posRank is a valid integer greater than 0."""
+        try:
+            return isinstance(pos_rank, int | float) and pos_rank > 0
+        except (TypeError, ValueError):
+            return False
+
+    df = df[df["posRank"].apply(is_valid_pos_rank)]
+    filtered_count = len(df)
+    print(
+        f"Filtered out {initial_count - filtered_count} players with "
+        f"invalid posRank (keeping {filtered_count} players)"
+    )
+
     # Create prev_seasons directory if it doesn't exist
     prev_seasons_dir = Path("prev_seasons")
     prev_seasons_dir.mkdir(exist_ok=True)
