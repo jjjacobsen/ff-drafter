@@ -116,8 +116,6 @@ def collect_current_season_projections(year: int):
             "position": p.position,
             "proj_points": p.projected_points,
         }
-        if player_row["proTeam"] == "None":
-            continue
         if player_row["proj_points"] == 0:
             continue
         player_data.append(player_row)

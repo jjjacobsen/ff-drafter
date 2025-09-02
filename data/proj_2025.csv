@@ -147,6 +147,7 @@ playerId,name,proTeam,position,proj_points
 4688813,Josh Downs,IND,WR,143.33
 4360248,Kyle Pitts Sr.,ATL,TE,118.67
 4877706,Jayden Higgins,HOU,WR,135.34
+4685702,Quinshon Judkins,None,RB,122.49
 -16002,Bills D/ST,BUF,D/ST,105.6
 4697815,Rachaad White,TB,RB,112.93
 4430034,Xavier Legette,CAR,WR,136.43
@@ -447,8 +448,10 @@ playerId,name,proTeam,position,proj_points
 3047876,KhaDarel Hodge,ATL,WR,21.73
 14012,Andy Dalton,CAR,QB,2.51
 4257188,Charlie Jones,CIN,WR,2.31
+4808830,Damien Martinez,None,RB,7.95
 2975417,Patrick Ricard,BAL,RB,5.43
 4039050,Devin Duvernay,CHI,WR,6.77
+4714365,Carson Steele,None,RB,5.55
 3115293,Kyle Allen,DET,QB,2.02
 2998565,Mo Alie-Cox,IND,TE,7.57
 4426407,Trey Palmer,NO,WR,9.58
@@ -457,12 +460,14 @@ playerId,name,proTeam,position,proj_points
 4040612,Luke Farrell,SF,TE,7.21
 4241263,Charlie Kolar,BAL,TE,11.31
 4361372,Jeremy Ruckert,NYJ,TE,13.25
+4243371,Riley Patterson,None,K,23.84
 4366963,Dylan Laube,LV,RB,4.07
 4242557,Colby Parkinson,LAR,TE,11.95
 4372505,Payne Durham,TB,TE,9.82
 4691688,Robbie Ouzts,SEA,RB,3.0
 4372071,Hassan Haskins,LAC,RB,5.94
 4708049,Gavin Bartholomew,MIN,TE,3.95
+4775196,Tommy Mellott,None,WR,11.58
 3127310,Drew Sample,CIN,TE,11.82
 4039160,Kylen Granson,PHI,TE,3.29
 4430723,Jared Wiley,KC,TE,4.18
@@ -477,12 +482,14 @@ playerId,name,proTeam,position,proj_points
 3118892,Justin Watson,HOU,WR,4.06
 4035656,Ben Skowronek,PIT,WR,3.06
 2578570,Jacoby Brissett,ARI,QB,2.37
+4692022,Javon Baker,None,WR,0.23
 4573697,Mason Tipton,NO,WR,3.21
 3050481,Tanner Hudson,CIN,TE,3.96
 3059989,Nick Mullens,JAX,QB,2.6
 4241961,Connor Heyward,PIT,TE,3.49
 4568024,Josh Williams,TB,RB,2.59
 4242546,Davis Mills,HOU,QB,2.42
+5083754,Ryan Flournoy,None,WR,15.67
 4573699,Jackson Hawes,BUF,TE,3.66
 4386544,Xavier Smith,LAR,WR,3.07
 4710855,Konata Mumpfield,LAR,WR,4.06
