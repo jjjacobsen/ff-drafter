@@ -16,7 +16,7 @@ import pandas as pd
 
 
 DEFAULT_BUDGET = 200  # per team, used when auto-creating a team
-MY_TEAM_NAME = "Me"
+MY_TEAM_NAME = "me"
 
 # Caps to avoid extreme swings
 CAP_MIN = 0.6
@@ -321,22 +321,15 @@ def _inflation_factor(
     teams: dict[str, Team],
     df: pd.DataFrame,
     drafted: set[str],
-    v0_total: float | None,
 ) -> float:
-    # Money remaining vs remaining base value, scaled to initial ratio
+    # With new salary model: sum(base salaries) == total team budgets.
+    # Inflation simplifies to: spendable_money_left / remaining_fair_value
     remaining_value = float(df.loc[~df["name"].isin(drafted), "salary"].sum())
-    if remaining_value <= 0:
+    if remaining_value <= 0 or not teams:
         return 1.0
 
-    if not teams:
-        return 1.0
-
-    mt = float(sum(t.remaining for t in teams.values()))
-    m0 = float(sum(t.budget for t in teams.values()))
-    if m0 <= 0 or not v0_total:
-        return 1.0
-
-    raw = (mt / remaining_value) * (v0_total / m0)
+    spendable = float(sum(t.remaining for t in teams.values()))
+    raw = spendable / remaining_value
     return _clamp(raw, INFLATION_MIN, INFLATION_MAX)
 
 
@@ -394,23 +387,52 @@ def _tier_gap_factor(
     return 1.0 + min(0.2, gap_ratio * TIER_GAP_WEIGHT)
 
 
+def _tier_scarcity_factor(
+    df: pd.DataFrame,
+    drafted: set[str],
+    pos: str,
+    tier_value: str | int | float | None,
+    need_level: str,
+) -> float:
+    # If I have a high (or medium) need and there are very few remaining
+    # players in this tier for this position, nudge the price up a bit.
+    if tier_value is None or tier_value == "" or pd.isna(tier_value):
+        return 1.0
+    pos_up = pos.upper()
+    rem = df.loc[
+        (df["position"].str.upper() == pos_up)
+        & (~df["name"].isin(drafted))
+        & (df.get("tier").astype(str) == str(tier_value)),
+        ["name"],
+    ]
+    remaining_in_tier = int(rem.shape[0])
+    if need_level == "high":
+        if remaining_in_tier <= 1:
+            return 1.10
+        if remaining_in_tier <= 3:
+            return 1.05
+    if need_level == "med" and remaining_in_tier <= 1:
+        return 1.05
+    return 1.0
+
+
 def adjusted_salary(
     row: pd.Series,
     df: pd.DataFrame,
     teams: dict[str, Team],
     drafted: set[str],
-    v0_total: float | None,
     pos_initial_counts: dict[str, int],
     my_team_name: str = MY_TEAM_NAME,
 ) -> int:
     base = int(row.get("salary", 0) or 0)
     pos = str(row.get("position", "")).upper()
     name = str(row.get("name", ""))
+    tier_value = row.get("tier") if "tier" in row else None
 
     mult = 1.0
 
     # Inflation
-    mult *= _inflation_factor(teams, df, drafted, v0_total)
+    mult *= _inflation_factor(teams, df, drafted)
 
     # Ensure my team exists for need eval
     my_team = teams.get(my_team_name)
@@ -434,6 +456,9 @@ def adjusted_salary(
     # Tier-gap factor (mild)
     mult *= _tier_gap_factor(df, drafted, pos, base, name)
 
+    # Tier scarcity factor (for my need)
+    mult *= _tier_scarcity_factor(df, drafted, pos, tier_value, level)
+
     # Final clamp and int conversion
     mult = _clamp(mult, CAP_MIN, CAP_MAX)
     return round(base * mult)
@@ -451,7 +476,6 @@ def main():
     teams: dict[str, Team] = {}
 
     # Precompute engine baselines
-    v0_total: float = float(df["salary"].sum())
     pos_initial_counts: dict[str, int] = (
         df["position"].str.upper().value_counts().to_dict()
     )
@@ -504,14 +528,19 @@ def main():
             else None
         )
 
-        print(f"Selected: {player_name} ({player_pos})")
+        player_tier = sel.get("tier") if "tier" in sel else None
+        tier_str = (
+            f" — Tier {player_tier}"
+            if player_tier is not None and not pd.isna(player_tier)
+            else ""
+        )
+        print(f"Selected: {player_name} ({player_pos}){tier_str}")
         if suggested is not None:
             adj = adjusted_salary(
                 sel,
                 df,
                 teams,
                 drafted,
-                v0_total,
                 pos_initial_counts,
                 MY_TEAM_NAME,
             )
@@ -519,13 +548,14 @@ def main():
         else:
             print("Suggested salary: n/a")
 
-        team = prompt_team(teams)
-        if team is None:
+        # Ask for price first, then team
+        price = prompt_price(adj if suggested is not None else None)
+        if price is None:
             print("Cancelled. Back to player search.")
             continue
 
-        price = prompt_price(suggested)
-        if price is None:
+        team = prompt_team(teams)
+        if team is None:
             print("Cancelled. Back to player search.")
             continue
 
