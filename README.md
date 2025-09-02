@@ -82,6 +82,14 @@ To collect previous season data for analysis:
 uv run inv collect-prev-season-data <year>
 ```
 
+### Collecting Current Season Projectsion
+
+To collect the projections for the current season:
+
+```bash
+uv run inv collect-current-season-projections <year>
+```
+
 ## License
 
 This project is open source. Please check the license file for details.

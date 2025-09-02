@@ -33,6 +33,10 @@ def collect_prev_season_data(year: int):
 
     player_data = []
     for p in players:
+        # Skip players with invalid posRank (not > 0)
+        if not (isinstance(p.posRank, int | float) and p.posRank > 0):
+            continue
+
         breakdown = p.stats[0]["breakdown"]
 
         player_row = {
@@ -95,32 +99,6 @@ def collect_prev_season_data(year: int):
 
     df = pd.DataFrame(player_data)
 
-    # Filter out players where posRank is not > 0 (handles 0, [], etc.)
-    initial_count = len(df)
-
-    def is_valid_pos_rank(pos_rank):
-        """Check if posRank is a valid integer greater than 0."""
-        try:
-            return isinstance(pos_rank, int | float) and pos_rank > 0
-        except (TypeError, ValueError):
-            return False
-
-    df = df[df["posRank"].apply(is_valid_pos_rank)]
-    filtered_count = len(df)
-    print(
-        f"Filtered out {initial_count - filtered_count} players with "
-        f"invalid posRank (keeping {filtered_count} players)"
-    )
-
-    # Create prev_seasons directory if it doesn't exist
-    prev_seasons_dir = Path("prev_seasons")
-    prev_seasons_dir.mkdir(exist_ok=True)
-
-    # Write DataFrame to CSV
-    csv_path = prev_seasons_dir / f"{year}.csv"
-    df.to_csv(csv_path, index=False)
-    print(f"\nData saved to: {csv_path}")
-
     return df
 
 
@@ -146,9 +124,6 @@ def collect_current_season_projections(year: int):
 
     df = pd.DataFrame(player_data)
 
-    proj_points_path = Path("proj_points.csv")
-    df.to_csv(proj_points_path, index=False)
-
     return df
 
 
@@ -168,6 +143,16 @@ def collect_prev_season_data_task(ctx, year):
 
     print(f"Collecting data for {year_int}...")
     df = collect_prev_season_data(year_int)
+
+    # Create prev_seasons directory if it doesn't exist
+    prev_seasons_dir = Path("prev_seasons")
+    prev_seasons_dir.mkdir(exist_ok=True)
+
+    # Write DataFrame to CSV
+    csv_path = prev_seasons_dir / f"{year_int}.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"\nData saved to: {csv_path}")
+
     print(f"Successfully collected data for {len(df)} players from {year_int} season")
 
 
@@ -187,6 +172,12 @@ def collect_current_season_projections_task(ctx, year):
 
     print(f"Collecting current season projections for {year_int}...")
     df = collect_current_season_projections(year_int)
+
+    # Write DataFrame to CSV
+    proj_points_path = Path("proj_points.csv")
+    df.to_csv(proj_points_path, index=False)
+    print(f"Data saved to: {proj_points_path}")
+
     print(
         f"Successfully collected projections for {len(df)} "
         f"players from {year_int} season"
