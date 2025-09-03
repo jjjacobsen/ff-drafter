@@ -100,6 +100,15 @@ I'd like you to treat prompt.md as your prompt and execute it
 
 Continue to use that chat to refine values as needed
 
+## Future Ideas
+
+- Redo the pricing engine. In fact, remove it entirely. Instead, display relevant information given the state of the draft
+  - For example - TE is up for auction. Tell me:
+    - Other teams need a TE (or don't need a TE)
+    - This is the last tier 1 TE
+  - Suggest players that I should save for (looking at my players, my money, and players available)
+- Don't include defence and kicking stats, it's just noise
+
 ## License
 
 This project is open source. Please check the license file for details.
