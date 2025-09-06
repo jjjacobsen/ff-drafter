@@ -108,6 +108,7 @@ Continue to use that chat to refine values as needed
     - This is the last tier 1 TE
   - Suggest players that I should save for (looking at my players, my money, and players available)
 - Don't include defence and kicking stats, it's just noise
+- Convert strategy.txt to .md because .txt is outdated
 
 ## License
 
