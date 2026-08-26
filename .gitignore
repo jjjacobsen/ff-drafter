@@ -209,3 +209,4 @@ __marimo__/
 strategy.txt
 zig-out/
 .zig-cache/
+zig-pkg/
