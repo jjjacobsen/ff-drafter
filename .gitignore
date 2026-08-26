@@ -2,3 +2,4 @@ strategy.txt
 zig-out/
 .zig-cache/
 zig-pkg/
+.env
