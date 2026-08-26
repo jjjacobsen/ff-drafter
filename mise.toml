@@ -1,3 +1,10 @@
 [tools]
+gitleaks = "latest"
+hk = "1.55.0"
+taplo = "latest"
+typos = "latest"
 zig = "0.16.0"
 zls = "0.16.0"
+
+[env]
+HK_MISE = 1
