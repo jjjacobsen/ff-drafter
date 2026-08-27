@@ -18,6 +18,7 @@ pub const Pick = struct {
 pub const Team = struct {
     team_id: i32,
     draft_position: i32,
+    autodraft_type_id: i32,
     amount_left: i32,
 };
 
@@ -137,7 +138,7 @@ fn decodeTeam(reader: *Reader, snapshot: *Snapshot) !?Team {
     _ = try reader.readI32();
     const team_id = try reader.readI32();
     const draft_position = try reader.readI32();
-    _ = try reader.readI32();
+    const autodraft_type_id = try reader.readI32();
     const amount_left = try reader.readI32();
 
     var count = try reader.readCount();
@@ -151,6 +152,7 @@ fn decodeTeam(reader: *Reader, snapshot: *Snapshot) !?Team {
     return .{
         .team_id = team_id,
         .draft_position = draft_position,
+        .autodraft_type_id = autodraft_type_id,
         .amount_left = amount_left,
     };
 }

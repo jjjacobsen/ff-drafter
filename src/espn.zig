@@ -293,11 +293,16 @@ fn handleMessage(
     const now_awake_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
 
     if (std.mem.eql(u8, command, "INIT")) {
-        var disable_autodraft = "AUTODRAFT false".*;
-        try client.writeText(&disable_autodraft);
         const encoded = fields.next().?;
         var snapshot = try init_decoder.decodeBase64(allocator, encoded);
         defer snapshot.deinit();
+
+        for (snapshot.teams.items) |team| {
+            if (team.team_id != config.team_id or team.autodraft_type_id == 0) continue;
+            var disable_autodraft = "AUTODRAFT false".*;
+            try client.writeText(&disable_autodraft);
+            break;
+        }
 
         for (snapshot.picks.items) |pick| {
             if (pick.player_id != -1) try ensurePlayer(http, allocator, shared, config, pick.player_id);
@@ -430,7 +435,17 @@ fn handleMessage(
         return;
     }
 
-    if (std.mem.eql(u8, command, "ERROR")) return error.EspnDraftError;
+    if (std.mem.eql(u8, command, "ERROR")) {
+        const status = try std.fmt.allocPrint(allocator, "ESPN rejected a draft command: {s}", .{message});
+        defer allocator.free(status);
+        {
+            const state = shared.lock();
+            defer shared.unlock();
+            try state.setStatus(.connecting, status);
+        }
+        _ = try loop.tryPostEvent(.draft_update);
+        return;
+    }
 }
 
 fn runAutomation(

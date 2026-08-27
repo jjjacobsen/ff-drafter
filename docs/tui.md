@@ -4,7 +4,7 @@
 
 The application watches and autonomously controls ESPN Fantasy Football auction drafts
 
-Automation is always active. It places optimizer-approved bids and nominates players when it is the user's turn. It disables ESPN autodraft after every connection so ESPN cannot bid independently of the optimizer
+Automation is active after live synchronization. It places optimizer-approved bids and nominates players when it is the user's turn. When `INIT` reports that ESPN autodraft is enabled, it disables ESPN autodraft so ESPN cannot bid independently of the optimizer
 
 ## Start the application
 
@@ -80,7 +80,9 @@ After initialization, these messages update the state:
 
 The decision engine recalculates under the same state mutex after these updates. The UI only renders the stored recommendation and never runs optimization work itself
 
-After every `INIT`, the WebSocket worker sends `AUTODRAFT false` before it starts autonomous control. This prevents ESPN and the optimizer from controlling the same team at the same time
+The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker sends `AUTODRAFT false` only when that value reports enabled autodraft. This prevents repeated no-op commands and keeps ESPN and the optimizer from controlling the same team at the same time
+
+An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open, stops automation, and shows the complete error instead of reconnecting and repeating the rejected command
 
 The WebSocket worker schedules and sends all actions. At or below the optimizer target, a bid waits 2 to 5 seconds. Above the target but within the optimizer maximum, it waits 1 to 3 seconds. The schedule is capped by a randomized 2 to 3 second deadline threshold. A newer bid cancels the old schedule and creates a new one from the updated state
 

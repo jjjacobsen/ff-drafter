@@ -333,7 +333,7 @@ The production controller confirms all relevant state immediately before it send
 
 ESPN should reject invalid commands, but the application must not depend on server rejection as its primary safety check
 
-The proof-of-concept listener was monitor-only. The production Zig controller sends `AUTODRAFT false` after every `INIT`, then sends optimizer-controlled `NOMINATE` and `BID` commands
+The proof-of-concept listener was monitor-only. The production Zig controller reads the user's `autodraftTypeId` from `INIT`, sends `AUTODRAFT false` only when needed, then sends optimizer-controlled `NOMINATE` and `BID` commands
 
 ## Keepalive behavior
 
@@ -389,7 +389,7 @@ Do not treat the raw WebSocket implementation as the final architecture. The pro
 5. Fetch `draftSecurity`
 6. Construct the WebSocket URL without encoding the token delimiters
 7. Connect as the only client for the member and team
-8. Disable ESPN autodraft immediately after `INIT`, then decode the snapshot and populate picks, team rosters, and remaining budgets
+8. Decode `INIT`, disable ESPN autodraft when the user's `autodraftTypeId` is nonzero, and populate picks, team rosters, and remaining budgets
 9. Apply `SOLD`, `ADJUSTED`, `UNDONE`, and `SLOT_CHANGED` updates
 10. Resolve missing player IDs from ESPN's athlete endpoint
 11. Validate turn, player, bid, roster, and budget state before every outgoing action
