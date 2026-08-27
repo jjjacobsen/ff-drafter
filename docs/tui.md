@@ -25,7 +25,7 @@ It reads `espn_s2` and `SWID` from `.env`
 
 ## Main screen
 
-The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, and remaining auction budget. For three seconds after a purchase, the winning team box also shows the price and player name. Terminals without Kitty graphics support show the team abbreviation instead of the logo
+The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, and remaining auction budget. A green line below the current high bidder moves when another team takes the lead. For three seconds after a purchase, the winning team box also shows the price and player name. Terminals without Kitty graphics support show the team abbreviation instead of the logo
 
 The center panel shows one of these states:
 
@@ -43,7 +43,7 @@ Press `esc` or `q` to exit
 
 The heading shows the team name and remaining auction budget
 
-The table always shows every configured starter and bench slot from ESPN. Filled slots show the player name and purchase cost. Unfilled slots remain blank
+The table always shows every configured starter and bench slot from ESPN. The rows use a fixed vertical interval and are centered in the table. Filled slots show the player name and purchase cost. Unfilled slots remain blank
 
 The team screen redraws after every draft update, including purchases and lineup slot changes. Live purchases and reconnect snapshots are both normalized into the first compatible open starter slot, then flex, then bench
 

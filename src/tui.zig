@@ -242,7 +242,7 @@ fn drawMain(
 ) void {
     const now_ms = std.Io.Timestamp.now(app.io, .awake).toMilliseconds();
     drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
-        .height = 9,
+        .height = 10,
     }), frame_allocator, now_ms);
 
     const content = window.child(.{
@@ -318,6 +318,18 @@ fn drawTeamBar(
                     .{ sale.cost, player_name },
                 ) catch unreachable;
                 printCentered(team_window, 6, summary, accent);
+            }
+        }
+
+        if (state.auction.bid_team_id) |bid_team_id| {
+            if (bid_team_id == team.id) {
+                const underline = window.child(.{
+                    .x_off = @intCast(start),
+                    .y_off = 9,
+                    .width = width,
+                    .height = 1,
+                });
+                underline.fill(.{ .char = .{ .grapheme = "─", .width = 1 }, .style = accent });
             }
         }
         start = end;
@@ -506,8 +518,11 @@ fn drawTeam(
 
 fn rosterTableRow(table_height: u16, index: usize, roster_size: usize) u16 {
     if (roster_size == 1) return 3;
-    const row_span = table_height -| 4;
-    return 3 + @as(u16, @intCast((index * row_span) / (roster_size - 1)));
+    const row_span: usize = @intCast(table_height -| 4);
+    const spacing = @max(row_span / (roster_size - 1), 1);
+    const used_span = spacing * (roster_size - 1);
+    const first_row = 3 + (row_span - used_span) / 2;
+    return @intCast(first_row + index * spacing);
 }
 
 fn rosterSlotName(slot_id: i32) []const u8 {
