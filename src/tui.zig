@@ -36,6 +36,7 @@ const App = struct {
     screen: Screen = .main,
     focused_team_id: ?i32 = null,
     last_focused_team_id: ?i32 = null,
+    confirm_exit: bool = false,
 
     fn init(allocator: std.mem.Allocator, io: std.Io, shared: *draft.Shared) App {
         return .{
@@ -99,7 +100,16 @@ const App = struct {
     }
 
     fn handleMainKey(self: *App, key: vaxis.Key) bool {
-        if (key.matches('q', .{}) or key.matches(vaxis.Key.escape, .{})) return true;
+        if (self.confirm_exit) {
+            if (key.matches('y', .{}) or key.matches(vaxis.Key.enter, .{})) return true;
+            if (key.matches('n', .{}) or key.matches(vaxis.Key.escape, .{})) self.confirm_exit = false;
+            return false;
+        }
+
+        if (key.matches('q', .{}) or key.matches(vaxis.Key.escape, .{})) {
+            self.confirm_exit = true;
+            return false;
+        }
 
         const state = self.shared.lock();
         defer self.shared.unlock();
@@ -159,7 +169,10 @@ const App = struct {
         }
 
         switch (self.screen) {
-            .main => drawMain(self, state, window, frame_allocator),
+            .main => {
+                drawMain(self, state, window, frame_allocator);
+                if (self.confirm_exit) drawExitDialog(window);
+            },
             .team => |team_id| drawTeam(state, team_id, window, frame_allocator),
         }
     }
@@ -700,6 +713,27 @@ fn teamSpend(state: *const draft.State, team: *const draft.Team) TeamSpend {
         spend.espn += state.players.get(purchase.player_id).?.estimated_price;
     }
     return spend;
+}
+
+fn drawExitDialog(window: vaxis.Window) void {
+    const width: u16 = 40;
+    const height: u16 = 7;
+    const dialog = window.child(.{
+        .x_off = @intCast((window.width - width) / 2),
+        .y_off = @intCast((window.height - height) / 2),
+        .width = width,
+        .height = height,
+        .border = .{ .where = .all, .style = selected },
+    });
+    dialog.child(.{
+        .x_off = 1,
+        .y_off = 1,
+        .width = width - 2,
+        .height = height - 2,
+    }).clear();
+
+    printCentered(dialog, 2, "Exit ff-drafter?", heading);
+    printCentered(dialog, 4, "y/enter exit  •  n/esc cancel", muted);
 }
 
 fn drawFooter(state: *const draft.State, window: vaxis.Window) void {

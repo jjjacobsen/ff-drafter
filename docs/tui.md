@@ -37,7 +37,7 @@ The center panel shows one of these states:
 
 The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` together with its target bid, maximum bid, ESPN legal maximum, replacement value, marginal value, and projected starter or bench role. A player without a complete budget-feasible roster fit gets a zero maximum and a clear explanation
 
-The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads
+The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads. Pressing `q` or `esc` opens an exit confirmation dialog. Press `y` or `enter` to exit, or press `n` or `esc` to cancel. A second `q` does not exit
 
 The screen starts without a focused team. Press `k` to focus the team from `teamId` in the draft URL. After moving with `h` or `l`, the application remembers that team when `j` clears focus and `k` restores it. Press `enter` to open the focused team
 
