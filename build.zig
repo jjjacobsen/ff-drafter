@@ -17,6 +17,12 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.addImport("vaxis", vaxis.module("vaxis"));
 
+    const websocket = b.dependency("websocket", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("websocket", websocket.module("websocket"));
+
     const exe = b.addExecutable(.{
         .name = "ff-drafter",
         .root_module = exe_mod,

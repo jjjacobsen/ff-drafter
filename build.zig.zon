@@ -36,6 +36,10 @@
             .url = "git+https://github.com/rockorager/libvaxis.git#c060d314930c5552b99a89278a6a695baf0352da",
             .hash = "vaxis-0.6.0-BWNV_LC4CwBka_bJk8SOXqzCM-nyQH00jzdL0kUhGwRE",
         },
+        .websocket = .{
+            .url = "git+https://github.com/karlseguin/websocket.zig.git#efa879736bd438bea8b86a91f220ba408de57273",
+            .hash = "websocket-0.1.0-ZPISdWoTBQA8iviFsepUZiKrmT-oEyc-BwfbVzYwu7LO",
+        },
     },
     .paths = .{
         "build.zig",
