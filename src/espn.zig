@@ -99,6 +99,7 @@ fn loadCatalog(
                 @intCast(item.get("id").?.integer),
                 player.get("fullName").?.string,
                 positionName(position_id),
+                @intCast(player.get("proTeamId").?.integer),
                 @intCast(item.get("draftAuctionValue").?.integer),
             );
         }
@@ -255,7 +256,7 @@ fn handleMessage(
         }
         if (snapshot.block) |block| {
             if (block.player_id != -1 and block.player_id != 0)
-                try ensurePlayer(http, allocator, shared, config, block.player_id);
+                try ensureNominatedPlayer(http, allocator, shared, loop, config, block.player_id);
         }
         return;
     }
@@ -272,7 +273,7 @@ fn handleMessage(
             state.setBid(team_id, player_id, amount, remaining, now_awake_ms);
         }
         _ = try loop.tryPostEvent(.draft_update);
-        try ensurePlayer(http, allocator, shared, config, player_id);
+        try ensureNominatedPlayer(http, allocator, shared, loop, config, player_id);
         return;
     }
 
@@ -289,7 +290,7 @@ fn handleMessage(
         }
         _ = try loop.tryPostEvent(.draft_update);
         if (player_id != -1 and player_id != 0)
-            try ensurePlayer(http, allocator, shared, config, player_id);
+            try ensureNominatedPlayer(http, allocator, shared, loop, config, player_id);
         return;
     }
 
@@ -393,7 +394,89 @@ fn ensurePlayer(
         athlete.get("fullName").?.string,
         athlete.get("position").?.object.get("abbreviation").?.string,
         0,
+        0,
     );
+}
+
+fn ensureNominatedPlayer(
+    http: *std.http.Client,
+    allocator: std.mem.Allocator,
+    shared: *draft.Shared,
+    loop: *events.Loop,
+    config: *const Config,
+    player_id: i32,
+) !void {
+    try ensurePlayer(http, allocator, shared, config, player_id);
+
+    const pro_team_id = image: {
+        const state = shared.lock();
+        defer shared.unlock();
+        if (!state.requestPlayerImage(player_id)) return;
+        break :image state.players.get(player_id).?.pro_team_id;
+    };
+
+    const url = if (player_id > 0)
+        try std.fmt.allocPrint(
+            allocator,
+            "https://a.espncdn.com/i/headshots/nfl/players/full/{d}.png",
+            .{player_id},
+        )
+    else
+        try std.fmt.allocPrint(
+            allocator,
+            "https://a.espncdn.com/i/teamlogos/nfl/500/{s}.png",
+            .{proTeamAbbreviation(pro_team_id)},
+        );
+    defer allocator.free(url);
+
+    const image = fetchEspn(http, allocator, config, url, null) catch |err| {
+        std.log.warn("could not load artwork for player {d}: {s}", .{ player_id, @errorName(err) });
+        return;
+    };
+    {
+        const state = shared.lock();
+        defer shared.unlock();
+        state.setPlayerImage(player_id, image);
+    }
+    _ = try loop.tryPostEvent(.draft_update);
+}
+
+fn proTeamAbbreviation(team_id: i32) []const u8 {
+    return switch (team_id) {
+        1 => "atl",
+        2 => "buf",
+        3 => "chi",
+        4 => "cin",
+        5 => "cle",
+        6 => "dal",
+        7 => "den",
+        8 => "det",
+        9 => "gb",
+        10 => "ten",
+        11 => "ind",
+        12 => "kc",
+        13 => "lv",
+        14 => "lar",
+        15 => "mia",
+        16 => "min",
+        17 => "ne",
+        18 => "no",
+        19 => "nyg",
+        20 => "nyj",
+        21 => "phi",
+        22 => "ari",
+        23 => "pit",
+        24 => "lac",
+        25 => "sf",
+        26 => "sea",
+        27 => "tb",
+        28 => "was",
+        29 => "car",
+        30 => "jax",
+        33 => "bal",
+        34 => "hou",
+        else => unreachable,
+    };
 }
 
 fn fetchEspn(

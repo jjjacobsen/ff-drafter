@@ -23,3 +23,7 @@ The macOS `script` command provides a pseudo-terminal but not a terminal emulato
 ## 2026-08-27: Uploaded ESPN team logos require authentication
 
 Team logos from `mystique-api.fantasy.espn.com` returned HTTP 401 while custom and vector logo hosts were public. Sending the same ESPN cookies used for league data to the Mystique API unblocked uploaded team logos
+
+## 2026-08-27: Vaxis bordered child dimensions exclude the border
+
+`Window.child` returns the inner window after it draws a border. The seven-row team box therefore had only five usable rows, and writing the budget to row five was clipped. Increasing the outer box to eight rows provided the required six inner rows

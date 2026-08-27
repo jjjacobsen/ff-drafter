@@ -11,11 +11,15 @@ pub const Status = enum {
 pub const Player = struct {
     name: []u8,
     position: []u8,
+    pro_team_id: i32,
     estimated_price: i32,
+    image_requested: bool = false,
+    image: ?[]u8 = null,
 
     fn deinit(self: *Player, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
         allocator.free(self.position);
+        if (self.image) |image| allocator.free(image);
     }
 };
 
@@ -116,11 +120,13 @@ pub const State = struct {
         id: i32,
         name: []const u8,
         position: []const u8,
+        pro_team_id: i32,
         estimated_price: i32,
     ) !void {
         const player: Player = .{
             .name = try self.allocator.dupe(u8, name),
             .position = try self.allocator.dupe(u8, position),
+            .pro_team_id = pro_team_id,
             .estimated_price = estimated_price,
         };
         errdefer {
@@ -136,6 +142,17 @@ pub const State = struct {
 
     pub fn hasPlayer(self: *const State, id: i32) bool {
         return self.players.contains(id);
+    }
+
+    pub fn requestPlayerImage(self: *State, id: i32) bool {
+        const player = self.players.getPtr(id).?;
+        if (player.image_requested) return false;
+        player.image_requested = true;
+        return true;
+    }
+
+    pub fn setPlayerImage(self: *State, id: i32, image: []u8) void {
+        self.players.getPtr(id).?.image = image;
     }
 
     pub fn teamIndexById(self: *const State, id: i32) ?usize {
@@ -227,6 +244,10 @@ pub const State = struct {
         });
         self.next_pick_number += 1;
         team.remaining_budget -= cost;
+        if (self.players.getPtr(player_id)) |player| {
+            if (player.image) |image| self.allocator.free(image);
+            player.image = null;
+        }
         self.auction = .{};
     }
 

@@ -20,11 +20,17 @@ const Screen = union(enum) {
     team: i32,
 };
 
+const PlayerImage = struct {
+    player_id: i32,
+    image: vaxis.Image,
+};
+
 const App = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     shared: *draft.Shared,
     team_images: std.AutoHashMap(i32, vaxis.Image),
+    player_image: ?PlayerImage = null,
     screen: Screen = .main,
     focused_team_id: ?i32 = null,
 
@@ -38,12 +44,16 @@ const App = struct {
     }
 
     fn deinit(self: *App, vx: *vaxis.Vaxis, tty: *vaxis.Tty) void {
-        var images = self.team_images.valueIterator();
-        while (images.next()) |image| vx.freeImage(tty.writer(), image.imageId());
+        var team_images = self.team_images.valueIterator();
+        while (team_images.next()) |image| vx.freeImage(tty.writer(), image.imageId());
         self.team_images.deinit();
+
+        if (self.player_image) |player_image| {
+            vx.freeImage(tty.writer(), player_image.image.imageId());
+        }
     }
 
-    fn loadTeamImages(self: *App, vx: *vaxis.Vaxis, tty: *vaxis.Tty) !void {
+    fn loadImages(self: *App, vx: *vaxis.Vaxis, tty: *vaxis.Tty) !void {
         if (!vx.caps.kitty_graphics) return;
 
         const state = self.shared.lock();
@@ -52,9 +62,27 @@ const App = struct {
             const logo = team.logo orelse continue;
             if (self.team_images.contains(team.id)) continue;
 
-            const image = try loadTeamImage(self.allocator, vx, tty, logo);
+            const image = try loadImage(self.allocator, vx, tty, logo);
             errdefer vx.freeImage(tty.writer(), image.imageId());
             try self.team_images.put(team.id, image);
+        }
+
+        const player_id = state.auction.player_id;
+        if (self.player_image) |player_image| {
+            if (player_id == null or player_image.player_id != player_id.?) {
+                vx.freeImage(tty.writer(), player_image.image.imageId());
+                self.player_image = null;
+            }
+        }
+
+        if (player_id) |id| {
+            if (self.player_image == null) {
+                const player = state.players.get(id) orelse return;
+                const image_bytes = player.image orelse return;
+                const image = try loadImage(self.allocator, vx, tty, image_bytes);
+                errdefer vx.freeImage(tty.writer(), image.imageId());
+                self.player_image = .{ .player_id = id, .image = image };
+            }
         }
     }
 
@@ -163,7 +191,7 @@ pub fn run(
 
     var app: App = .init(allocator, init.io, shared);
     defer app.deinit(&vx, &tty);
-    try app.loadTeamImages(&vx, &tty);
+    try app.loadImages(&vx, &tty);
     app.draw(vx.window());
     try vx.render(tty.writer());
 
@@ -174,13 +202,13 @@ pub fn run(
             .winsize => |winsize| try vx.resize(allocator, tty.writer(), winsize),
             .draft_update, .tick => {},
         }
-        try app.loadTeamImages(&vx, &tty);
+        try app.loadImages(&vx, &tty);
         app.draw(vx.window());
         try vx.render(tty.writer());
     }
 }
 
-fn loadTeamImage(
+fn loadImage(
     allocator: std.mem.Allocator,
     vx: *vaxis.Vaxis,
     tty: *vaxis.Tty,
@@ -195,14 +223,14 @@ fn loadTeamImage(
 
 fn drawMain(app: *const App, state: *const draft.State, window: vaxis.Window) void {
     drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
-        .height = 7,
+        .height = 8,
     }));
 
     const content = window.child(.{
-        .y_off = 8,
-        .height = window.height -| 11,
+        .y_off = 9,
+        .height = window.height -| 12,
     });
-    drawAuction(state, app.io, content);
+    drawAuction(state, app.player_image, app.io, content);
     drawFooter(state, window);
 }
 
@@ -227,7 +255,7 @@ fn drawTeamBar(
         const team_window = window.child(.{
             .x_off = @intCast(start),
             .width = width,
-            .height = 7,
+            .height = 8,
             .border = .{ .where = .all, .style = border_style },
         });
         const team_text = team_window.child(.{
@@ -261,7 +289,12 @@ fn drawTeamBar(
     }
 }
 
-fn drawAuction(state: *const draft.State, io: std.Io, window: vaxis.Window) void {
+fn drawAuction(
+    state: *const draft.State,
+    player_image: ?PlayerImage,
+    io: std.Io,
+    window: vaxis.Window,
+) void {
     const panel_width = @min(window.width -| 4, 70);
     const panel_height = @min(window.height, 13);
     const panel = window.child(.{
@@ -271,12 +304,7 @@ fn drawAuction(state: *const draft.State, io: std.Io, window: vaxis.Window) void
         .height = panel_height,
         .border = .{ .where = .all, .style = accent },
     });
-    const content = panel.child(.{
-        .x_off = 1,
-        .y_off = 1,
-        .width = panel.width -| 2,
-        .height = panel.height -| 2,
-    });
+    const content = panel;
 
     if (state.auction.player_id) |player_id| {
         var unknown_buffer: [48]u8 = undefined;
@@ -290,27 +318,45 @@ fn drawAuction(state: *const draft.State, io: std.Io, window: vaxis.Window) void
 
         printCentered(content, 1, name, .{ .bold = true });
 
+        var details_window = content;
+        if (player_image != null and player_image.?.player_id == player_id) {
+            const image = player_image.?.image;
+            const artwork_width = @min(content.width / 4, 12);
+            const artwork = content.child(.{
+                .x_off = 1,
+                .y_off = 2,
+                .width = artwork_width,
+                .height = 8,
+            });
+            image.draw(artwork, .{ .scale = .fit }) catch unreachable;
+            details_window = content.child(.{
+                .x_off = @intCast(artwork_width + 2),
+                .width = content.width -| artwork_width -| 3,
+                .height = content.height,
+            });
+        }
+
         var details_buffer: [64]u8 = undefined;
         const details = std.fmt.bufPrint(
             &details_buffer,
             "{s}  •  ESPN value ${d}",
             .{ position, estimated_price },
         ) catch unreachable;
-        printCentered(content, 3, details, muted);
+        printCentered(details_window, 3, details, muted);
 
         var bid_buffer: [32]u8 = undefined;
         const bid = std.fmt.bufPrint(&bid_buffer, "${d}", .{state.auction.bid_amount}) catch unreachable;
-        printCentered(content, 5, bid, money);
+        printCentered(details_window, 5, bid, money);
 
         if (state.auction.bid_team_id) |team_id| {
             const bidder = teamName(state, team_id) orelse "Unknown team";
-            printCentered(content, 7, bidder, heading);
+            printCentered(details_window, 7, bidder, heading);
         }
 
         var clock_buffer: [16]u8 = undefined;
         const remaining = state.clockRemainingMs(std.Io.Timestamp.now(io, .awake).toMilliseconds());
         const clock_text = formatClock(&clock_buffer, remaining);
-        printCentered(content, 9, clock_text, clock);
+        printCentered(details_window, 9, clock_text, clock);
         return;
     }
 

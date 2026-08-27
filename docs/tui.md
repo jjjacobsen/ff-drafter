@@ -29,7 +29,7 @@ The top bar contains all teams in draft order. Each team box shows its name, ESP
 
 The center panel shows one of these states:
 
-- The nominated player, position, ESPN auction value, current bid, leading team, and time remaining
+- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, and time remaining
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
