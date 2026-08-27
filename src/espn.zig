@@ -271,11 +271,16 @@ fn handleMessage(
         for (snapshot.picks.items) |pick| {
             if (pick.player_id != -1) try ensurePlayer(http, allocator, shared, config, pick.player_id);
         }
+        if (snapshot.block) |block| {
+            if (block.player_id != -1 and block.player_id != 0)
+                try ensurePlayer(http, allocator, shared, config, block.player_id);
+        }
 
         {
             const state = shared.lock();
             defer shared.unlock();
             try state.applyInit(&snapshot, nowTimes(io));
+            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
 
@@ -292,10 +297,12 @@ fn handleMessage(
         const amount = try nextInt(i32, &fields);
         _ = try nextInt(i64, &fields);
         const remaining = try nextInt(i64, &fields);
+        try ensurePlayer(http, allocator, shared, config, player_id);
         {
             const state = shared.lock();
             defer shared.unlock();
             state.setBid(team_id, player_id, amount, remaining, now_awake_ms);
+            try state.refreshRecommendation(false);
         }
         _ = try loop.tryPostEvent(.draft_update);
         try ensureNominatedPlayer(http, allocator, shared, loop, config, player_id);
@@ -308,10 +315,13 @@ fn handleMessage(
         const team_id = try nextIntOr(i32, &fields, -1);
         const player_id = try nextIntOr(i32, &fields, -1);
         const amount = try nextIntOr(i32, &fields, -1);
+        if (player_id != -1 and player_id != 0)
+            try ensurePlayer(http, allocator, shared, config, player_id);
         {
             const state = shared.lock();
             defer shared.unlock();
             state.setClockMessage(time, team_id, player_id, amount, now_awake_ms);
+            try state.refreshRecommendation(false);
         }
         _ = try loop.tryPostEvent(.draft_update);
         if (player_id != -1 and player_id != 0)
@@ -326,6 +336,7 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.setNomination(team_id, remaining, now_awake_ms);
+            try state.refreshRecommendation(false);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -341,6 +352,7 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             try state.applySold(team_id, player_id, slot_id, amount, now_awake_ms);
+            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -354,6 +366,7 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.applyAdjusted(pick_number, new_price);
+            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -365,6 +378,7 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.applyUndone(pick_number);
+            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -379,6 +393,7 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.applySlotChanged(team_id, player_id, new_slot_id);
+            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;

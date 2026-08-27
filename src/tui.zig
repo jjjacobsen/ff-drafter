@@ -358,7 +358,7 @@ fn drawAuction(
     frame_allocator: std.mem.Allocator,
 ) void {
     const panel_width = @min(window.width -| 4, 70);
-    const panel_height = @min(window.height, 13);
+    const panel_height = @min(window.height, 17);
     const panel = window.child(.{
         .x_off = @intCast((window.width - panel_width) / 2),
         .y_off = @intCast((window.height - panel_height) / 2),
@@ -414,9 +414,45 @@ fn drawAuction(
         const bid = std.fmt.allocPrint(frame_allocator, "${d}", .{state.auction.bid_amount}) catch unreachable;
         printCentered(content, 5, bid, money);
 
+        const recommendation = state.recommendation;
+        if (recommendation.player_id == player_id) {
+            const action = switch (recommendation.action) {
+                .bid => "BID",
+                .hold => "HOLD",
+                .pass => "PASS",
+            };
+            const recommendation_text = std.fmt.allocPrint(
+                frame_allocator,
+                "{s}  •  target ${d}  •  max ${d}  •  legal ${d}",
+                .{ action, recommendation.target_bid, recommendation.max_bid, recommendation.legal_max },
+            ) catch unreachable;
+            printCentered(
+                content,
+                11,
+                recommendation_text,
+                if (recommendation.action == .bid) accent else details_style,
+            );
+        }
+
         if (state.auction.bid_team_id) |team_id| {
             const bidder = teamName(state, team_id) orelse "Unknown team";
             printCentered(content, 7, bidder, heading);
+        }
+
+        if (recommendation.player_id == player_id) {
+            const explanation = if (recommendation.max_bid == 0)
+                "No value-preserving roster plan"
+            else
+                std.fmt.allocPrint(
+                    frame_allocator,
+                    "{s}  •  replacement ${d}  •  marginal +${d}",
+                    .{
+                        if (recommendation.projected_starter) "Starter" else "Bench",
+                        recommendation.replacement_value,
+                        recommendation.marginal_value,
+                    },
+                ) catch unreachable;
+            printCentered(content, 13, explanation, details_style);
         }
 
         const remaining = state.clockRemainingMs(now_ms);

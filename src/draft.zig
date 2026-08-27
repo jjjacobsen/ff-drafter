@@ -1,5 +1,6 @@
 const std = @import("std");
 const init_decoder = @import("init_decoder.zig");
+const optimizer = @import("optimizer.zig");
 
 pub const Status = enum {
     loading,
@@ -64,6 +65,26 @@ pub const RecentSale = struct {
     sold_at_ms: i64,
 };
 
+pub const RecommendationAction = enum {
+    bid,
+    hold,
+    pass,
+};
+
+pub const Recommendation = struct {
+    action: RecommendationAction = .pass,
+    player_id: ?i32 = null,
+    estimated_value: i32 = 0,
+    replacement_value: i32 = 0,
+    marginal_value: i32 = 0,
+    target_bid: i32 = 0,
+    max_bid: i32 = 0,
+    legal_max: i32 = 0,
+    projected_starter: bool = false,
+    starter_value: i32 = 0,
+    bench_value: i32 = 0,
+};
+
 pub const State = struct {
     allocator: std.mem.Allocator,
     user_team_id: i32,
@@ -77,6 +98,8 @@ pub const State = struct {
     total_picks: usize = 0,
     next_pick_number: i32 = 1,
     recent_sale: ?RecentSale = null,
+    recommendation: Recommendation = .{},
+    recommendation_dirty: bool = true,
 
     pub fn init(allocator: std.mem.Allocator, user_team_id: i32) !State {
         return .{
@@ -113,6 +136,7 @@ pub const State = struct {
     }
 
     pub fn addTeam(self: *State, id: i32, name: []const u8, abbreviation: []const u8) !void {
+        self.recommendation_dirty = true;
         const owned_name = try self.allocator.dupe(u8, name);
         errdefer self.allocator.free(owned_name);
         const owned_abbreviation = try self.allocator.dupe(u8, abbreviation);
@@ -129,10 +153,12 @@ pub const State = struct {
     }
 
     pub fn resetRosterSlots(self: *State) void {
+        self.recommendation_dirty = true;
         self.roster_slots.clearRetainingCapacity();
     }
 
     pub fn addRosterSlot(self: *State, slot_id: i32) !void {
+        self.recommendation_dirty = true;
         try self.roster_slots.append(self.allocator, slot_id);
     }
 
@@ -144,6 +170,7 @@ pub const State = struct {
         pro_team_id: i32,
         estimated_price: i32,
     ) !void {
+        self.recommendation_dirty = true;
         const player: Player = .{
             .name = try self.allocator.dupe(u8, name),
             .position = try self.allocator.dupe(u8, position),
@@ -184,6 +211,7 @@ pub const State = struct {
     }
 
     pub fn applyInit(self: *State, snapshot: *const init_decoder.Snapshot, now: Times) !void {
+        self.recommendation_dirty = true;
         for (self.teams.items) |*team| team.roster.clearRetainingCapacity();
 
         for (snapshot.teams.items) |draft_team| {
@@ -249,7 +277,12 @@ pub const State = struct {
         amount: i32,
         now_ms: i64,
     ) void {
-        if (player_id != -1 and player_id != 0) self.auction.player_id = player_id;
+        const has_player = player_id != -1 and player_id != 0;
+        if (has_player and self.auction.player_id != player_id) {
+            self.auction.bid_team_id = null;
+            self.auction.bid_amount = 0;
+        }
+        if (has_player) self.auction.player_id = player_id;
         if (team_id > 0) self.auction.bid_team_id = team_id;
         if (amount >= 0) self.auction.bid_amount = amount;
         self.setClock(time_remaining_ms, now_ms);
@@ -268,6 +301,7 @@ pub const State = struct {
         cost: i32,
         now_ms: i64,
     ) !void {
+        self.recommendation_dirty = true;
         const pick_number = self.next_pick_number;
         const team = &self.teams.items[self.teamIndexById(team_id).?];
         const roster_slot_id = self.resolveRosterSlot(team, player_id, slot_id);
@@ -295,6 +329,7 @@ pub const State = struct {
     }
 
     pub fn applyAdjusted(self: *State, pick_number: i32, new_price: i32) void {
+        self.recommendation_dirty = true;
         for (self.teams.items) |*team| {
             for (team.roster.items) |*purchase| {
                 if (purchase.pick_number != pick_number) continue;
@@ -310,6 +345,7 @@ pub const State = struct {
     }
 
     pub fn applyUndone(self: *State, pick_number: i32) void {
+        self.recommendation_dirty = true;
         for (self.teams.items) |*team| {
             for (team.roster.items, 0..) |purchase, index| {
                 if (purchase.pick_number != pick_number) continue;
@@ -327,6 +363,7 @@ pub const State = struct {
     }
 
     pub fn applySlotChanged(self: *State, team_id: i32, player_id: i32, new_slot_id: i32) void {
+        self.recommendation_dirty = true;
         const team = &self.teams.items[self.teamIndexById(team_id).?];
         for (team.roster.items) |*purchase| {
             if (purchase.player_id != player_id) continue;
@@ -338,6 +375,33 @@ pub const State = struct {
 
     pub fn clockRemainingMs(self: *const State, now_ms: i64) i64 {
         return @max(self.auction.clock_duration_ms - (now_ms - self.auction.clock_set_at_ms), 0);
+    }
+
+    pub fn calculateRecommendation(self: *const State) !Recommendation {
+        return optimizer.recommend(self.allocator, self, slotAcceptsPosition);
+    }
+
+    pub fn refreshRecommendation(self: *State, force: bool) !void {
+        const player_id = self.auction.player_id orelse {
+            self.recommendation = .{};
+            return;
+        };
+        if (force or self.recommendation_dirty or self.recommendation.player_id != player_id) {
+            self.recommendation = try self.calculateRecommendation();
+            self.recommendation_dirty = false;
+            return;
+        }
+
+        const next_bid = if (self.auction.bid_team_id == null and self.auction.bid_amount == 0)
+            1
+        else
+            self.auction.bid_amount + 1;
+        self.recommendation.action = if (self.auction.bid_team_id == self.user_team_id)
+            .hold
+        else if (next_bid <= self.recommendation.max_bid)
+            .bid
+        else
+            .pass;
     }
 
     fn resolveRosterSlot(self: *const State, team: *const Team, player_id: i32, requested_slot_id: i32) i32 {
@@ -410,7 +474,7 @@ pub const Shared = struct {
     }
 };
 
-fn slotAcceptsPosition(slot_id: i32, position: []const u8) bool {
+pub fn slotAcceptsPosition(slot_id: i32, position: []const u8) bool {
     return switch (slot_id) {
         0, 1 => std.mem.eql(u8, position, "QB"),
         2 => std.mem.eql(u8, position, "RB"),

@@ -47,3 +47,15 @@ Live purchases updated team budgets but some players did not appear in the roste
 ## 2026-08-27: Reconnect roster item slot IDs also require normalization
 
 The `INIT` snapshot's draft roster items appeared to provide authoritative lineup slots, but a live reconnect showed the same missing players as the raw pick slots. Loading omitted drafted players before applying `INIT`, then running every snapshot purchase through the live purchase slot resolver, made reconnect and live updates use the same assignment behavior
+
+## 2026-08-27: Zig rejected runtime control flow in an inline enum loop
+
+The optimizer used `inline for` over enum tags and then used runtime conditions with `continue`. Zig reported `comptime control flow inside runtime block`. Changing both loops to normal `for` loops kept the enum iteration and allowed runtime filtering
+
+## 2026-08-27: Zig could not infer mutually recursive error sets
+
+The optimizer's roster search has two functions that recursively call each other. Zig reported an error-set dependency loop when both used inferred error sets. Declaring `anyerror!void` on both recursive functions broke the inference loop
+
+## 2026-08-27: Combinatorial roster planning froze the live worker
+
+Live process PID 75403 stayed at 100% CPU for minutes. A macOS sample showed the network worker recursively trapped in `optimizer.Search.allocatePlan` inside `refreshRecommendation` while it held the state mutex, so `q` and escape waited forever for worker shutdown. Replacing budget and position-plan enumeration with two bounded rectangular Hungarian assignments removed the recursive search. Each solve is now `O(S²C)` for `S` slots and `C` retained candidates

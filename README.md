@@ -24,4 +24,5 @@ The application gets all room identifiers from the URL. Use the new URL each tim
 ## Documentation
 
 - [TUI architecture and behavior](docs/tui.md)
+- [Dynamic roster optimizer](docs/optimizer.md)
 - [ESPN draft integration handoff](docs/espn-draft-handoff.md)

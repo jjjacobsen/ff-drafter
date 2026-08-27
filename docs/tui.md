@@ -2,7 +2,7 @@
 
 ## Scope
 
-The application is a read-only watcher for ESPN Fantasy Football auction drafts
+The application is a read-only watcher and bid advisor for ESPN Fantasy Football auction drafts
 
 It does not nominate players, place bids, or change autodraft settings. ESPN must already have autodraft enabled if the room must continue without input
 
@@ -29,9 +29,11 @@ The top bar contains all teams in draft order. Each team box shows its name, ESP
 
 The center panel shows one of these states:
 
-- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, and completed pick count
+- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, completed pick count, and optimizer recommendation
 - The team that must nominate and its time remaining
 - A waiting message between auctions
+
+The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` together with its target bid, maximum bid, ESPN legal maximum, replacement value, marginal value, and projected starter or bench role. A player without a complete budget-feasible roster fit gets a zero maximum and a clear explanation
 
 The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads
 
@@ -74,7 +76,11 @@ After initialization, these messages update the state:
 - `UNDONE`
 - `SLOT_CHANGED`
 
+The decision engine recalculates under the same state mutex after these updates. The UI only renders the stored recommendation and never runs optimization work itself
+
 The WebSocket runs in one worker. The UI reads shared state under a mutex and receives Vaxis events when the state changes
+
+See [Dynamic roster optimizer](optimizer.md) for the planning model and bid-value definitions
 
 ## Connection behavior
 
