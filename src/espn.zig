@@ -258,6 +258,10 @@ fn handleMessage(
         var snapshot = try init_decoder.decodeBase64(allocator, encoded);
         defer snapshot.deinit();
 
+        for (snapshot.picks.items) |pick| {
+            if (pick.player_id != -1) try ensurePlayer(http, allocator, shared, config, pick.player_id);
+        }
+
         {
             const state = shared.lock();
             defer shared.unlock();
@@ -265,9 +269,6 @@ fn handleMessage(
         }
         _ = try loop.tryPostEvent(.draft_update);
 
-        for (snapshot.picks.items) |pick| {
-            if (pick.player_id != -1) try ensurePlayer(http, allocator, shared, config, pick.player_id);
-        }
         if (snapshot.block) |block| {
             if (block.player_id != -1 and block.player_id != 0)
                 try ensureNominatedPlayer(http, allocator, shared, loop, config, block.player_id);

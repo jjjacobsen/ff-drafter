@@ -200,10 +200,11 @@ pub const State = struct {
             if (pick.player_id == -1) continue;
             self.completed_picks += 1;
             const team = &self.teams.items[self.teamIndexById(pick.team_id).?];
+            const requested_slot_id = snapshotRosterSlot(snapshot, pick.team_id, pick.player_id);
             try team.roster.append(self.allocator, .{
                 .pick_number = pick.pick_number,
                 .player_id = pick.player_id,
-                .slot_id = pick.slot_id,
+                .slot_id = self.resolveRosterSlot(team, pick.player_id, requested_slot_id),
                 .cost = pick.bid_amount,
             });
             self.next_pick_number = @max(self.next_pick_number, pick.pick_number + 1);
@@ -439,6 +440,13 @@ fn slotAcceptsPosition(slot_id: i32, position: []const u8) bool {
             std.mem.eql(u8, position, "TE"),
         else => unreachable,
     };
+}
+
+fn snapshotRosterSlot(snapshot: *const init_decoder.Snapshot, team_id: i32, player_id: i32) i32 {
+    for (snapshot.roster_items.items) |item| {
+        if (item.team_id == team_id and item.player_id == player_id) return item.slot_id;
+    }
+    unreachable;
 }
 
 fn lessThanDraftPosition(_: void, left: Team, right: Team) bool {

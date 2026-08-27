@@ -43,3 +43,7 @@ The previous league URL stopped exposing `draftInit` after the draft ended, so i
 ## 2026-08-27: `SOLD` slot IDs can be player position IDs
 
 Live purchases updated team budgets but some players did not appear in the roster table. The `SOLD` slot matched ESPN player position IDs for affected positions instead of configured lineup slot IDs, such as WR position `3` versus WR lineup slot `4`. Resolving each purchase into the first compatible open starter, flex, or bench slot prevents roster entries from becoming invisible
+
+## 2026-08-27: Reconnect roster item slot IDs also require normalization
+
+The `INIT` snapshot's draft roster items appeared to provide authoritative lineup slots, but a live reconnect showed the same missing players as the raw pick slots. Loading omitted drafted players before applying `INIT`, then running every snapshot purchase through the live purchase slot resolver, made reconnect and live updates use the same assignment behavior

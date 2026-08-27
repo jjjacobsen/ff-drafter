@@ -45,7 +45,7 @@ The heading shows the team name and remaining auction budget
 
 The table always shows every configured starter and bench slot from ESPN. Filled slots show the player name and purchase cost. Unfilled slots remain blank
 
-The team screen redraws after every draft update, including purchases and lineup slot changes. New purchases are assigned to the first compatible open starter slot, then flex, then bench
+The team screen redraws after every draft update, including purchases and lineup slot changes. Live purchases and reconnect snapshots are both normalized into the first compatible open starter slot, then flex, then bench
 
 Press `esc` or `q` to return to the main screen
 
@@ -59,7 +59,7 @@ The first `INIT` WebSocket message is Base64-encoded binary data. `src/init_deco
 
 - Draft order
 - Team budgets
-- Completed auction purchases
+- Completed auction purchases and their normalized roster assignments
 - The current player and bid state
 
 A future pick has `playerId = -1`. Other negative IDs are valid for team defenses and must not be treated as empty picks

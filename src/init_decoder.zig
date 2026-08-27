@@ -21,15 +21,23 @@ pub const Team = struct {
     amount_left: i32,
 };
 
+pub const RosterItem = struct {
+    team_id: i32,
+    slot_id: i32,
+    player_id: i32,
+};
+
 pub const Snapshot = struct {
     allocator: std.mem.Allocator,
     block: ?Block,
     picks: std.ArrayList(Pick) = .empty,
     teams: std.ArrayList(Team) = .empty,
+    roster_items: std.ArrayList(RosterItem) = .empty,
 
     pub fn deinit(self: *Snapshot) void {
         self.picks.deinit(self.allocator);
         self.teams.deinit(self.allocator);
+        self.roster_items.deinit(self.allocator);
     }
 };
 
@@ -81,7 +89,7 @@ fn decodeLeague(reader: *Reader, snapshot: *Snapshot) !void {
 
     count = try reader.readCount();
     while (count > 0) : (count -= 1) {
-        if (try decodeTeam(reader)) |team| try snapshot.teams.append(snapshot.allocator, team);
+        if (try decodeTeam(reader, snapshot)) |team| try snapshot.teams.append(snapshot.allocator, team);
     }
 }
 
@@ -124,7 +132,7 @@ fn decodePick(reader: *Reader) !?Pick {
     };
 }
 
-fn decodeTeam(reader: *Reader) !?Team {
+fn decodeTeam(reader: *Reader, snapshot: *Snapshot) !?Team {
     if (!try reader.readHeader(2)) return null;
     _ = try reader.readI32();
     const team_id = try reader.readI32();
@@ -136,7 +144,9 @@ fn decodeTeam(reader: *Reader) !?Team {
     while (count > 0) : (count -= 1) try skipOwner(reader);
 
     count = try reader.readCount();
-    while (count > 0) : (count -= 1) try skipRosterItem(reader);
+    while (count > 0) : (count -= 1) {
+        if (try decodeRosterItem(reader)) |item| try snapshot.roster_items.append(snapshot.allocator, item);
+    }
 
     return .{
         .team_id = team_id,
@@ -206,10 +216,18 @@ fn skipOwner(reader: *Reader) !void {
     _ = try reader.readBool();
 }
 
-fn skipRosterItem(reader: *Reader) !void {
-    if (!try reader.readHeader(1)) return;
-    try reader.skipInts(4);
+fn decodeRosterItem(reader: *Reader) !?RosterItem {
+    if (!try reader.readHeader(1)) return null;
+    _ = try reader.readI32();
+    const team_id = try reader.readI32();
+    const slot_id = try reader.readI32();
+    const player_id = try reader.readI32();
     _ = try reader.readBool();
+    return .{
+        .team_id = team_id,
+        .slot_id = slot_id,
+        .player_id = player_id,
+    };
 }
 
 fn skipDraftList(reader: *Reader) !void {
