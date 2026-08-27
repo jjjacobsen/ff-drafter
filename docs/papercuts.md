@@ -71,3 +71,7 @@ The autonomous controller joined the room but left ESPN autodraft unchanged. ESP
 ## 2026-08-27: A rejected draft command caused a reconnect storm
 
 The message handler treated every ESPN `ERROR` as a broken socket. A rejected command therefore closed a healthy connection, rejoined, repeated the command, and failed again. Treating `ERROR` as a command-level failure keeps the socket open, stops automation, and shows ESPN's complete response without reconnecting
+
+## 2026-08-27: ESPN rejected commands without a trailing newline
+
+The browser bundle's WebSocket transport appends `\n` to every command before sending it. The controller included the newline on `PING` but omitted it from `AUTODRAFT`, `BID`, and `NOMINATE`, which caused `ERROR 1 Invalid arguments for command`. Adding the newline inside each WebSocket text frame made the commands match ESPN's browser protocol

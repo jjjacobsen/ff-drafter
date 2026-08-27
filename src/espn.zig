@@ -299,7 +299,7 @@ fn handleMessage(
 
         for (snapshot.teams.items) |team| {
             if (team.team_id != config.team_id or team.autodraft_type_id == 0) continue;
-            var disable_autodraft = "AUTODRAFT false".*;
+            var disable_autodraft = "AUTODRAFT false\n".*;
             try client.writeText(&disable_autodraft);
             break;
         }
@@ -549,10 +549,10 @@ fn sendAction(client: *websocket.Client, outgoing: ?OutgoingAction) !void {
     const action = outgoing orelse return;
     var buffer: [64]u8 = undefined;
     const message = switch (action) {
-        .bid => |bid| try std.fmt.bufPrint(&buffer, "BID {d} {d}", .{ bid.player_id, bid.amount }),
+        .bid => |bid| try std.fmt.bufPrint(&buffer, "BID {d} {d}\n", .{ bid.player_id, bid.amount }),
         .nominate => |nomination| try std.fmt.bufPrint(
             &buffer,
-            "NOMINATE {d} {d}",
+            "NOMINATE {d} {d}\n",
             .{ nomination.player_id, nomination.amount },
         ),
     };

@@ -310,6 +310,8 @@ sendNominationMessage(playerId, initialBid)
 sendBidMessage(playerOnBlock.playerId, bidAmount)
 ```
 
+Every outgoing command must end with a newline inside the WebSocket frame. ESPN can reject an otherwise valid command as `Invalid arguments for command` when the newline is missing
+
 Other supported outgoing commands include:
 
 ```text
@@ -321,7 +323,7 @@ SELECT {playerId}
 LEAVE
 ```
 
-The production controller confirms all relevant state immediately before it sends an action:
+The production controller confirms all relevant state immediately before it sends a newline-terminated action:
 
 - It is our nomination or bidding turn
 - The player is still available
