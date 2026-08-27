@@ -39,3 +39,7 @@ A temporary clock-format validation failed because the old stdout API no longer 
 ## 2026-08-27: Ended ESPN draft league data returned 404
 
 The previous league URL stopped exposing `draftInit` after the draft ended, so its roster configuration could not be inspected. A new live league confirmed 15 draftable roster slots per team: nine starters and six bench slots, with two IR slots excluded from the auction roster
+
+## 2026-08-27: `SOLD` slot IDs can be player position IDs
+
+Live purchases updated team budgets but some players did not appear in the roster table. The `SOLD` slot matched ESPN player position IDs for affected positions instead of configured lineup slot IDs, such as WR position `3` versus WR lineup slot `4`. Resolving each purchase into the first compatible open starter, flex, or bench slot prevents roster entries from becoming invisible

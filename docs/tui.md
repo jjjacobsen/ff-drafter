@@ -45,7 +45,7 @@ The heading shows the team name and remaining auction budget
 
 The table always shows every configured starter and bench slot from ESPN. Filled slots show the player name and purchase cost. Unfilled slots remain blank
 
-The team screen redraws after every draft update, including purchases and lineup slot changes
+The team screen redraws after every draft update, including purchases and lineup slot changes. New purchases are assigned to the first compatible open starter slot, then flex, then bench
 
 Press `esc` or `q` to return to the main screen
 

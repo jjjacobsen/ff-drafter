@@ -269,10 +269,11 @@ pub const State = struct {
     ) !void {
         const pick_number = self.next_pick_number;
         const team = &self.teams.items[self.teamIndexById(team_id).?];
+        const roster_slot_id = self.resolveRosterSlot(team, player_id, slot_id);
         try team.roster.append(self.allocator, .{
             .pick_number = pick_number,
             .player_id = player_id,
-            .slot_id = slot_id,
+            .slot_id = roster_slot_id,
             .cost = cost,
         });
         self.completed_picks += 1;
@@ -338,6 +339,37 @@ pub const State = struct {
         return @max(self.auction.clock_duration_ms - (now_ms - self.auction.clock_set_at_ms), 0);
     }
 
+    fn resolveRosterSlot(self: *const State, team: *const Team, player_id: i32, requested_slot_id: i32) i32 {
+        const position = self.players.get(player_id).?.position;
+        if (slotAcceptsPosition(requested_slot_id, position) and
+            self.rosterSlotHasSpace(team, requested_slot_id))
+        {
+            return requested_slot_id;
+        }
+
+        for (self.roster_slots.items) |slot_id| {
+            if (slot_id == 20) continue;
+            if (!slotAcceptsPosition(slot_id, position)) continue;
+            if (self.rosterSlotHasSpace(team, slot_id)) return slot_id;
+        }
+
+        if (self.rosterSlotHasSpace(team, 20)) return 20;
+        unreachable;
+    }
+
+    fn rosterSlotHasSpace(self: *const State, team: *const Team, slot_id: i32) bool {
+        var capacity: usize = 0;
+        for (self.roster_slots.items) |roster_slot_id| {
+            if (roster_slot_id == slot_id) capacity += 1;
+        }
+
+        var occupied: usize = 0;
+        for (team.roster.items) |purchase| {
+            if (purchase.slot_id == slot_id) occupied += 1;
+        }
+        return occupied < capacity;
+    }
+
     fn setClock(self: *State, duration_ms: i64, now_ms: i64) void {
         self.auction.clock_duration_ms = @max(duration_ms, 0);
         self.auction.clock_set_at_ms = now_ms;
@@ -376,6 +408,38 @@ pub const Shared = struct {
         return self.stop.load(.acquire);
     }
 };
+
+fn slotAcceptsPosition(slot_id: i32, position: []const u8) bool {
+    return switch (slot_id) {
+        0, 1 => std.mem.eql(u8, position, "QB"),
+        2 => std.mem.eql(u8, position, "RB"),
+        3 => std.mem.eql(u8, position, "RB") or std.mem.eql(u8, position, "WR"),
+        4 => std.mem.eql(u8, position, "WR"),
+        5 => std.mem.eql(u8, position, "WR") or std.mem.eql(u8, position, "TE"),
+        6 => std.mem.eql(u8, position, "TE"),
+        7 => std.mem.eql(u8, position, "QB") or
+            std.mem.eql(u8, position, "RB") or
+            std.mem.eql(u8, position, "WR") or
+            std.mem.eql(u8, position, "TE"),
+        8 => std.mem.eql(u8, position, "DT"),
+        9 => std.mem.eql(u8, position, "DE"),
+        10 => std.mem.eql(u8, position, "LB"),
+        11 => std.mem.eql(u8, position, "DL"),
+        12 => std.mem.eql(u8, position, "CB"),
+        13 => std.mem.eql(u8, position, "S"),
+        14 => std.mem.eql(u8, position, "DB"),
+        15 => std.mem.eql(u8, position, "DP"),
+        16 => std.mem.eql(u8, position, "D/ST"),
+        17 => std.mem.eql(u8, position, "K"),
+        18 => std.mem.eql(u8, position, "P"),
+        19 => std.mem.eql(u8, position, "HC"),
+        20, 22, 24 => true,
+        23 => std.mem.eql(u8, position, "RB") or
+            std.mem.eql(u8, position, "WR") or
+            std.mem.eql(u8, position, "TE"),
+        else => unreachable,
+    };
+}
 
 fn lessThanDraftPosition(_: void, left: Team, right: Team) bool {
     return left.draft_position < right.draft_position;

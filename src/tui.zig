@@ -429,13 +429,13 @@ fn drawTeam(
     printCentered(window, 3, budget, money);
 
     const roster_size = state.roster_slots.items.len;
-    if (window.height < roster_size + 11) {
+    if (window.height < roster_size + 12) {
         printCentered(window, 6, "Terminal is too short for the full roster", error_style);
         return;
     }
 
     const table_width = @min(window.width -| 4, 86);
-    const table_height: u16 = @intCast(roster_size + 5);
+    const table_height = window.height -| 7;
     const table = window.child(.{
         .x_off = @intCast((window.width - table_width) / 2),
         .y_off = 5,
@@ -469,7 +469,7 @@ fn drawTeam(
     divider.fill(.{ .char = .{ .grapheme = "─", .width = 1 }, .style = muted });
 
     for (state.roster_slots.items, 0..) |slot_id, index| {
-        const row: u16 = @intCast(index + 3);
+        const row = rosterTableRow(table.height, index, roster_size);
         const slot_style = if (slot_id == 20) muted else accent;
         _ = table.printSegment(.{ .text = rosterSlotName(slot_id), .style = slot_style }, .{
             .row_offset = row,
@@ -502,6 +502,12 @@ fn drawTeam(
     }
 
     printCentered(window, window.height -| 1, "esc/q back", muted);
+}
+
+fn rosterTableRow(table_height: u16, index: usize, roster_size: usize) u16 {
+    if (roster_size == 1) return 3;
+    const row_span = table_height -| 4;
+    return 3 + @as(u16, @intCast((index * row_span) / (roster_size - 1)));
 }
 
 fn rosterSlotName(slot_id: i32) []const u8 {

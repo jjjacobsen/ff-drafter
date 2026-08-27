@@ -209,7 +209,7 @@ NOMINATION {teamId} {timeToPick}
 SOLD {teamId} {playerId} {slotId} {bidAmount}
 ```
 
-A completed auction purchase is therefore available immediately from `SOLD`
+A completed auction purchase is therefore available immediately from `SOLD`. The `slotId` can be an ESPN player position ID rather than a configured lineup slot ID, so the watcher must resolve it to an open compatible starter, flex, or bench slot
 
 Example parsed result:
 
