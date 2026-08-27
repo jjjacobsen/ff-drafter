@@ -27,6 +27,7 @@ const PlayerImage = struct {
 
 const App = struct {
     allocator: std.mem.Allocator,
+    frame_arena: std.heap.ArenaAllocator,
     io: std.Io,
     shared: *draft.Shared,
     team_images: std.AutoHashMap(i32, vaxis.Image),
@@ -37,6 +38,7 @@ const App = struct {
     fn init(allocator: std.mem.Allocator, io: std.Io, shared: *draft.Shared) App {
         return .{
             .allocator = allocator,
+            .frame_arena = .init(allocator),
             .io = io,
             .shared = shared,
             .team_images = std.AutoHashMap(i32, vaxis.Image).init(allocator),
@@ -44,6 +46,7 @@ const App = struct {
     }
 
     fn deinit(self: *App, vx: *vaxis.Vaxis, tty: *vaxis.Tty) void {
+        self.frame_arena.deinit();
         var team_images = self.team_images.valueIterator();
         while (team_images.next()) |image| vx.freeImage(tty.writer(), image.imageId());
         self.team_images.deinit();
@@ -134,6 +137,9 @@ const App = struct {
     }
 
     fn draw(self: *App, window: vaxis.Window) void {
+        _ = self.frame_arena.reset(.retain_capacity);
+        const frame_allocator = self.frame_arena.allocator();
+
         window.clear();
         window.hideCursor();
 
@@ -146,8 +152,8 @@ const App = struct {
         }
 
         switch (self.screen) {
-            .main => drawMain(self, state, window),
-            .team => |team_id| drawTeam(state, team_id, window),
+            .main => drawMain(self, state, window, frame_allocator),
+            .team => |team_id| drawTeam(state, team_id, window, frame_allocator),
         }
     }
 };
@@ -221,16 +227,21 @@ fn loadImage(
     return vx.loadImage(allocator, tty.writer(), .{ .mem = png });
 }
 
-fn drawMain(app: *const App, state: *const draft.State, window: vaxis.Window) void {
+fn drawMain(
+    app: *const App,
+    state: *const draft.State,
+    window: vaxis.Window,
+    frame_allocator: std.mem.Allocator,
+) void {
     drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
         .height = 8,
-    }));
+    }), frame_allocator);
 
     const content = window.child(.{
         .y_off = 9,
         .height = window.height -| 12,
     });
-    drawAuction(state, app.player_image, app.io, content);
+    drawAuction(state, app.player_image, app.io, content, frame_allocator);
     drawFooter(state, window);
 }
 
@@ -239,6 +250,7 @@ fn drawTeamBar(
     team_images: *const std.AutoHashMap(i32, vaxis.Image),
     focused_team_id: ?i32,
     window: vaxis.Window,
+    frame_allocator: std.mem.Allocator,
 ) void {
     const team_count = state.teams.items.len;
     if (team_count == 0) {
@@ -282,8 +294,7 @@ fn drawTeamBar(
             printCentered(team_window, 3, team.abbreviation, accent);
         }
 
-        var budget_buffer: [24]u8 = undefined;
-        const budget = std.fmt.bufPrint(&budget_buffer, "${d}", .{team.remaining_budget}) catch unreachable;
+        const budget = std.fmt.allocPrint(frame_allocator, "${d}", .{team.remaining_budget}) catch unreachable;
         printCentered(team_window, 5, budget, money);
         start = end;
     }
@@ -294,6 +305,7 @@ fn drawAuction(
     player_image: ?PlayerImage,
     io: std.Io,
     window: vaxis.Window,
+    frame_allocator: std.mem.Allocator,
 ) void {
     const panel_width = @min(window.width -| 4, 70);
     const panel_height = @min(window.height, 13);
@@ -307,12 +319,11 @@ fn drawAuction(
     const content = panel;
 
     if (state.auction.player_id) |player_id| {
-        var unknown_buffer: [48]u8 = undefined;
         const player = state.players.get(player_id);
         const name = if (player) |value|
             value.name
         else
-            std.fmt.bufPrint(&unknown_buffer, "Player {d}", .{player_id}) catch unreachable;
+            std.fmt.allocPrint(frame_allocator, "Player {d}", .{player_id}) catch unreachable;
         const position = if (player) |value| value.position else "--";
         const estimated_price = if (player) |value| value.estimated_price else 0;
 
@@ -336,16 +347,14 @@ fn drawAuction(
             });
         }
 
-        var details_buffer: [64]u8 = undefined;
-        const details = std.fmt.bufPrint(
-            &details_buffer,
+        const details = std.fmt.allocPrint(
+            frame_allocator,
             "{s}  •  ESPN value ${d}",
             .{ position, estimated_price },
         ) catch unreachable;
         printCentered(details_window, 3, details, muted);
 
-        var bid_buffer: [32]u8 = undefined;
-        const bid = std.fmt.bufPrint(&bid_buffer, "${d}", .{state.auction.bid_amount}) catch unreachable;
+        const bid = std.fmt.allocPrint(frame_allocator, "${d}", .{state.auction.bid_amount}) catch unreachable;
         printCentered(details_window, 5, bid, money);
 
         if (state.auction.bid_team_id) |team_id| {
@@ -353,9 +362,8 @@ fn drawAuction(
             printCentered(details_window, 7, bidder, heading);
         }
 
-        var clock_buffer: [16]u8 = undefined;
         const remaining = state.clockRemainingMs(std.Io.Timestamp.now(io, .awake).toMilliseconds());
-        const clock_text = formatClock(&clock_buffer, remaining);
+        const clock_text = formatClock(frame_allocator, remaining);
         printCentered(details_window, 9, clock_text, clock);
         return;
     }
@@ -363,9 +371,8 @@ fn drawAuction(
     if (state.auction.nomination_team_id) |team_id| {
         printCentered(content, 2, "Waiting for nomination", heading);
         printCentered(content, 4, teamName(state, team_id) orelse "Unknown team", accent);
-        var clock_buffer: [16]u8 = undefined;
         const remaining = state.clockRemainingMs(std.Io.Timestamp.now(io, .awake).toMilliseconds());
-        printCentered(content, 7, formatClock(&clock_buffer, remaining), clock);
+        printCentered(content, 7, formatClock(frame_allocator, remaining), clock);
         return;
     }
 
@@ -373,14 +380,18 @@ fn drawAuction(
     printCentered(content, 6, state.status_message, statusStyle(state.status));
 }
 
-fn drawTeam(state: *const draft.State, team_id: i32, window: vaxis.Window) void {
+fn drawTeam(
+    state: *const draft.State,
+    team_id: i32,
+    window: vaxis.Window,
+    frame_allocator: std.mem.Allocator,
+) void {
     const team_index = state.teamIndexById(team_id) orelse return;
     const team = state.teams.items[team_index];
 
     printCentered(window, 1, team.name, .{ .bold = true });
-    var budget_buffer: [48]u8 = undefined;
-    const budget = std.fmt.bufPrint(
-        &budget_buffer,
+    const budget = std.fmt.allocPrint(
+        frame_allocator,
         "${d} remaining",
         .{team.remaining_budget},
     ) catch unreachable;
@@ -428,11 +439,10 @@ fn drawTeam(state: *const draft.State, team_id: i32, window: vaxis.Window) void 
             const row: u16 = @intCast(index + 3);
             const player = state.players.get(purchase.player_id);
             const position = if (player) |value| value.position else "--";
-            var player_buffer: [48]u8 = undefined;
             const name = if (player) |value|
                 value.name
             else
-                std.fmt.bufPrint(&player_buffer, "Player {d}", .{purchase.player_id}) catch unreachable;
+                std.fmt.allocPrint(frame_allocator, "Player {d}", .{purchase.player_id}) catch unreachable;
 
             _ = table.printSegment(.{ .text = position, .style = accent }, .{
                 .row_offset = row,
@@ -447,8 +457,7 @@ fn drawTeam(state: *const draft.State, team_id: i32, window: vaxis.Window) void 
             });
             _ = player_name.printSegment(.{ .text = name }, .{ .wrap = .none });
 
-            var cost_buffer: [16]u8 = undefined;
-            const cost = std.fmt.bufPrint(&cost_buffer, "${d}", .{purchase.cost}) catch unreachable;
+            const cost = std.fmt.allocPrint(frame_allocator, "${d}", .{purchase.cost}) catch unreachable;
             _ = table.printSegment(.{ .text = cost, .style = money }, .{
                 .row_offset = row,
                 .col_offset = table.width -| @as(u16, @intCast(cost.len + 2)),
@@ -480,10 +489,10 @@ fn teamName(state: *const draft.State, team_id: i32) ?[]const u8 {
     return state.teams.items[index].name;
 }
 
-fn formatClock(buffer: []u8, milliseconds: i64) []const u8 {
+fn formatClock(frame_allocator: std.mem.Allocator, milliseconds: i64) []const u8 {
     const total_seconds = @divFloor(milliseconds + 999, 1000);
-    return std.fmt.bufPrint(
-        buffer,
+    return std.fmt.allocPrint(
+        frame_allocator,
         "{d}:{d:0>2}",
         .{ @divFloor(total_seconds, 60), @mod(total_seconds, 60) },
     ) catch unreachable;

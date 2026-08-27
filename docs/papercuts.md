@@ -27,3 +27,7 @@ Team logos from `mystique-api.fantasy.espn.com` returned HTTP 401 while custom a
 ## 2026-08-27: Vaxis bordered child dimensions exclude the border
 
 `Window.child` returns the inner window after it draws a border. The seven-row team box therefore had only five usable rows, and writing the budget to row five was clipped. Increasing the outer box to eight rows provided the required six inner rows
+
+## 2026-08-27: Vaxis retains grapheme slices until render
+
+`Window.printSegment` stores slices into the supplied text instead of copying them. Formatted values held in function-local stack buffers became invalid before `Vaxis.render`, which produced corrupted budgets, prices, and clocks. A frame-scoped arena now keeps all formatted text valid through rendering
