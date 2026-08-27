@@ -74,6 +74,8 @@ fn loadCatalog(
 
     const body = try fetchEspn(http, allocator, config, url, player_filter);
     defer allocator.free(body);
+    if (shared.shouldStop()) return;
+
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, body, .{});
     defer parsed.deinit();
 
@@ -120,13 +122,21 @@ fn loadCatalog(
     }
 
     for (teams) |team_value| {
+        if (shared.shouldStop()) return;
+
         const team = team_value.object;
         const logo = try fetchEspn(http, allocator, config, team.get("logo").?.string, null);
+        if (shared.shouldStop()) {
+            allocator.free(logo);
+            return;
+        }
+
         const state = shared.lock();
         defer shared.unlock();
         state.setTeamLogo(@intCast(team.get("id").?.integer), logo);
     }
 
+    if (shared.shouldStop()) return;
     try setStatus(shared, loop, .connecting, "Connecting to live draft");
 }
 

@@ -33,11 +33,11 @@ The center panel shows one of these states:
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-The footer shows connection status
+The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads
 
 The screen starts without a focused team. Press `k` to focus the team from `teamId` in the draft URL. After moving with `h` or `l`, the application remembers that team when `j` clears focus and `k` restores it. Press `enter` to open the focused team
 
-Press `esc` or `q` to exit
+Press `esc` or `q` to exit, including while teams and players are loading
 
 ## Team screen
 

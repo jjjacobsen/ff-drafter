@@ -199,6 +199,7 @@ pub fn run(
     });
     defer {
         shared.stop.store(true, .release);
+        vx.exitAltScreen(tty.writer()) catch {};
         worker.await(init.io);
     }
 
@@ -587,7 +588,9 @@ fn purchaseForRosterSlot(team: *const draft.Team, slot_id: i32, occurrence: usiz
 }
 
 fn drawFooter(state: *const draft.State, window: vaxis.Window) void {
-    printCentered(window, window.height -| 1, state.status_message, statusStyle(state.status));
+    printCentered(window, window.height -| 2, state.status_message, statusStyle(state.status));
+
+    printCentered(window, window.height -| 1, "hjkl navigation  •  esc/q exit", muted);
 }
 
 fn printCentered(window: vaxis.Window, row: u16, text: []const u8, style: Cell.Style) void {
