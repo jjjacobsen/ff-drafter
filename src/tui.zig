@@ -242,12 +242,12 @@ fn drawMain(
 ) void {
     const now_ms = std.Io.Timestamp.now(app.io, .awake).toMilliseconds();
     drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
-        .height = 10,
+        .height = 11,
     }), frame_allocator, now_ms);
 
     const content = window.child(.{
-        .y_off = 10,
-        .height = window.height -| 13,
+        .y_off = 12,
+        .height = window.height -| 15,
     });
     drawAuction(state, app.player_image, now_ms, content, frame_allocator);
     drawFooter(state, window);
@@ -330,6 +330,19 @@ fn drawTeamBar(
                     .height = 1,
                 });
                 underline.fill(.{ .char = .{ .grapheme = "─", .width = 1 }, .style = accent });
+
+                const bid = std.fmt.allocPrint(
+                    frame_allocator,
+                    "${d}",
+                    .{state.auction.bid_amount},
+                ) catch unreachable;
+                const bid_window = window.child(.{
+                    .x_off = @intCast(start),
+                    .y_off = 10,
+                    .width = width,
+                    .height = 1,
+                });
+                printCentered(bid_window, 0, bid, money);
             }
         }
         start = end;
