@@ -31,3 +31,7 @@ Team logos from `mystique-api.fantasy.espn.com` returned HTTP 401 while custom a
 ## 2026-08-27: Vaxis retains grapheme slices until render
 
 `Window.printSegment` stores slices into the supplied text instead of copying them. Formatted values held in function-local stack buffers became invalid before `Vaxis.render`, which produced corrupted budgets, prices, and clocks. A frame-scoped arena now keeps all formatted text valid through rendering
+
+## 2026-08-27: Zig 0.16 removed `std.fs.File.stdout`
+
+A temporary clock-format validation failed because the old stdout API no longer exists. Using `std.debug.print` confirmed that unsigned seconds format as `0:04` and `0:11`

@@ -233,15 +233,16 @@ fn drawMain(
     window: vaxis.Window,
     frame_allocator: std.mem.Allocator,
 ) void {
+    const now_ms = std.Io.Timestamp.now(app.io, .awake).toMilliseconds();
     drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
-        .height = 8,
-    }), frame_allocator);
+        .height = 9,
+    }), frame_allocator, now_ms);
 
     const content = window.child(.{
-        .y_off = 9,
-        .height = window.height -| 12,
+        .y_off = 10,
+        .height = window.height -| 13,
     });
-    drawAuction(state, app.player_image, app.io, content, frame_allocator);
+    drawAuction(state, app.player_image, now_ms, content, frame_allocator);
     drawFooter(state, window);
 }
 
@@ -251,6 +252,7 @@ fn drawTeamBar(
     focused_team_id: ?i32,
     window: vaxis.Window,
     frame_allocator: std.mem.Allocator,
+    now_ms: i64,
 ) void {
     const team_count = state.teams.items.len;
     if (team_count == 0) {
@@ -267,7 +269,7 @@ fn drawTeamBar(
         const team_window = window.child(.{
             .x_off = @intCast(start),
             .width = width,
-            .height = 8,
+            .height = 9,
             .border = .{ .where = .all, .style = border_style },
         });
         const team_text = team_window.child(.{
@@ -296,6 +298,21 @@ fn drawTeamBar(
 
         const budget = std.fmt.allocPrint(frame_allocator, "${d}", .{team.remaining_budget}) catch unreachable;
         printCentered(team_window, 5, budget, money);
+
+        if (state.recent_sale) |sale| {
+            if (sale.team_id == team.id and now_ms - sale.sold_at_ms < 3_000) {
+                const player_name = if (state.players.get(sale.player_id)) |player|
+                    player.name
+                else
+                    std.fmt.allocPrint(frame_allocator, "Player {d}", .{sale.player_id}) catch unreachable;
+                const summary = std.fmt.allocPrint(
+                    frame_allocator,
+                    "${d} - {s}",
+                    .{ sale.cost, player_name },
+                ) catch unreachable;
+                printCentered(team_window, 6, summary, accent);
+            }
+        }
         start = end;
     }
 }
@@ -303,7 +320,7 @@ fn drawTeamBar(
 fn drawAuction(
     state: *const draft.State,
     player_image: ?PlayerImage,
-    io: std.Io,
+    now_ms: i64,
     window: vaxis.Window,
     frame_allocator: std.mem.Allocator,
 ) void {
@@ -317,6 +334,19 @@ fn drawAuction(
         .border = .{ .where = .all, .style = accent },
     });
     const content = panel;
+
+    if (state.total_picks > 0) {
+        const progress = std.fmt.allocPrint(
+            frame_allocator,
+            "{d} of {d} picks",
+            .{ state.completed_picks, state.total_picks },
+        ) catch unreachable;
+        _ = content.printSegment(.{ .text = progress, .style = accent }, .{
+            .row_offset = 0,
+            .col_offset = content.width -| @as(u16, @intCast(progress.len)),
+            .wrap = .none,
+        });
+    }
 
     if (state.auction.player_id) |player_id| {
         const player = state.players.get(player_id);
@@ -362,7 +392,7 @@ fn drawAuction(
             printCentered(details_window, 7, bidder, heading);
         }
 
-        const remaining = state.clockRemainingMs(std.Io.Timestamp.now(io, .awake).toMilliseconds());
+        const remaining = state.clockRemainingMs(now_ms);
         const clock_text = formatClock(frame_allocator, remaining);
         printCentered(details_window, 9, clock_text, clock);
         return;
@@ -371,7 +401,7 @@ fn drawAuction(
     if (state.auction.nomination_team_id) |team_id| {
         printCentered(content, 2, "Waiting for nomination", heading);
         printCentered(content, 4, teamName(state, team_id) orelse "Unknown team", accent);
-        const remaining = state.clockRemainingMs(std.Io.Timestamp.now(io, .awake).toMilliseconds());
+        const remaining = state.clockRemainingMs(now_ms);
         printCentered(content, 7, formatClock(frame_allocator, remaining), clock);
         return;
     }
@@ -491,10 +521,11 @@ fn teamName(state: *const draft.State, team_id: i32) ?[]const u8 {
 
 fn formatClock(frame_allocator: std.mem.Allocator, milliseconds: i64) []const u8 {
     const total_seconds = @divFloor(milliseconds + 999, 1000);
+    const seconds: u8 = @intCast(@mod(total_seconds, 60));
     return std.fmt.allocPrint(
         frame_allocator,
         "{d}:{d:0>2}",
-        .{ @divFloor(total_seconds, 60), @mod(total_seconds, 60) },
+        .{ @divFloor(total_seconds, 60), seconds },
     ) catch unreachable;
 }
 

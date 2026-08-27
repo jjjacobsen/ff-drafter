@@ -314,7 +314,7 @@ fn handleMessage(
         {
             const state = shared.lock();
             defer shared.unlock();
-            try state.applySold(team_id, player_id, slot_id, amount);
+            try state.applySold(team_id, player_id, slot_id, amount, now_awake_ms);
         }
         _ = try loop.tryPostEvent(.draft_update);
         try ensurePlayer(http, allocator, shared, config, player_id);

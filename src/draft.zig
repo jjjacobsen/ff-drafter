@@ -56,6 +56,14 @@ pub const Auction = struct {
     clock_set_at_ms: i64 = 0,
 };
 
+pub const RecentSale = struct {
+    pick_number: i32,
+    team_id: i32,
+    player_id: i32,
+    cost: i32,
+    sold_at_ms: i64,
+};
+
 pub const State = struct {
     allocator: std.mem.Allocator,
     user_team_id: i32,
@@ -64,7 +72,10 @@ pub const State = struct {
     auction: Auction = .{},
     status: Status = .loading,
     status_message: []u8,
+    completed_picks: usize = 0,
+    total_picks: usize = 0,
     next_pick_number: i32 = 1,
+    recent_sale: ?RecentSale = null,
 
     pub fn init(allocator: std.mem.Allocator, user_team_id: i32) !State {
         return .{
@@ -171,9 +182,13 @@ pub const State = struct {
             team.remaining_budget = draft_team.amount_left;
         }
 
+        self.completed_picks = 0;
+        self.total_picks = snapshot.picks.items.len;
         self.next_pick_number = 1;
+        self.recent_sale = null;
         for (snapshot.picks.items) |pick| {
             if (pick.player_id == -1) continue;
+            self.completed_picks += 1;
             const team = &self.teams.items[self.teamIndexById(pick.team_id).?];
             try team.roster.append(self.allocator, .{
                 .pick_number = pick.pick_number,
@@ -234,16 +249,32 @@ pub const State = struct {
         self.setClock(time_remaining_ms, now_ms);
     }
 
-    pub fn applySold(self: *State, team_id: i32, player_id: i32, slot_id: i32, cost: i32) !void {
+    pub fn applySold(
+        self: *State,
+        team_id: i32,
+        player_id: i32,
+        slot_id: i32,
+        cost: i32,
+        now_ms: i64,
+    ) !void {
+        const pick_number = self.next_pick_number;
         const team = &self.teams.items[self.teamIndexById(team_id).?];
         try team.roster.append(self.allocator, .{
-            .pick_number = self.next_pick_number,
+            .pick_number = pick_number,
             .player_id = player_id,
             .slot_id = slot_id,
             .cost = cost,
         });
+        self.completed_picks += 1;
         self.next_pick_number += 1;
         team.remaining_budget -= cost;
+        self.recent_sale = .{
+            .pick_number = pick_number,
+            .team_id = team_id,
+            .player_id = player_id,
+            .cost = cost,
+            .sold_at_ms = now_ms,
+        };
         if (self.players.getPtr(player_id)) |player| {
             if (player.image) |image| self.allocator.free(image);
             player.image = null;
@@ -257,6 +288,9 @@ pub const State = struct {
                 if (purchase.pick_number != pick_number) continue;
                 team.remaining_budget += purchase.cost - new_price;
                 purchase.cost = new_price;
+                if (self.recent_sale) |*sale| {
+                    if (sale.pick_number == pick_number) sale.cost = new_price;
+                }
                 return;
             }
         }
@@ -269,7 +303,11 @@ pub const State = struct {
                 if (purchase.pick_number != pick_number) continue;
                 team.remaining_budget += purchase.cost;
                 _ = team.roster.orderedRemove(index);
+                self.completed_picks -= 1;
                 self.next_pick_number = pick_number;
+                if (self.recent_sale) |sale| {
+                    if (sale.pick_number == pick_number) self.recent_sale = null;
+                }
                 return;
             }
         }

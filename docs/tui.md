@@ -25,11 +25,11 @@ It reads `espn_s2` and `SWID` from `.env`
 
 ## Main screen
 
-The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, and remaining auction budget. Terminals without Kitty graphics support show the team abbreviation instead of the logo
+The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, and remaining auction budget. For three seconds after a purchase, the winning team box also shows the price and player name. Terminals without Kitty graphics support show the team abbreviation instead of the logo
 
 The center panel shows one of these states:
 
-- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, and time remaining
+- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, and completed pick count
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
