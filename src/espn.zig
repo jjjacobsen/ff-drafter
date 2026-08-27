@@ -87,6 +87,7 @@ fn loadCatalog(
             try state.addTeam(
                 @intCast(team.get("id").?.integer),
                 team.get("name").?.string,
+                team.get("abbrev").?.string,
             );
         }
 
@@ -101,10 +102,17 @@ fn loadCatalog(
                 @intCast(item.get("draftAuctionValue").?.integer),
             );
         }
-
-        try state.setStatus(.connecting, "Connecting to live draft");
     }
-    _ = try loop.tryPostEvent(.draft_update);
+
+    for (teams) |team_value| {
+        const team = team_value.object;
+        const logo = try fetchEspn(http, allocator, config, team.get("logo").?.string, null);
+        const state = shared.lock();
+        defer shared.unlock();
+        state.setTeamLogo(@intCast(team.get("id").?.integer), logo);
+    }
+
+    try setStatus(shared, loop, .connecting, "Connecting to live draft");
 }
 
 fn runConnection(
@@ -413,7 +421,9 @@ fn fetchEspn(
         extra_headers[extra_header_count] = .{ .name = "X-Fantasy-Filter", .value = value };
         extra_header_count += 1;
     }
-    if (std.mem.startsWith(u8, url, "https://lm-api-reads.fantasy.espn.com/")) {
+    if (std.mem.startsWith(u8, url, "https://lm-api-reads.fantasy.espn.com/") or
+        std.mem.startsWith(u8, url, "https://mystique-api.fantasy.espn.com/"))
+    {
         extra_headers[extra_header_count] = .{ .name = "Cookie", .value = cookie };
         extra_header_count += 1;
     }

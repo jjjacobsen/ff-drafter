@@ -5,6 +5,7 @@ const config_module = @import("config.zig");
 const draft = @import("draft.zig");
 const espn = @import("espn.zig");
 const events = @import("events.zig");
+const svg = @import("svg.zig");
 
 const accent: Cell.Style = .{ .fg = .{ .rgb = .{ 92, 200, 160 } }, .bold = true };
 const selected: Cell.Style = .{ .fg = .{ .rgb = .{ 255, 213, 79 } }, .bold = true };
@@ -20,10 +21,42 @@ const Screen = union(enum) {
 };
 
 const App = struct {
+    allocator: std.mem.Allocator,
     io: std.Io,
     shared: *draft.Shared,
+    team_images: std.AutoHashMap(i32, vaxis.Image),
     screen: Screen = .main,
     focused_team_id: ?i32 = null,
+
+    fn init(allocator: std.mem.Allocator, io: std.Io, shared: *draft.Shared) App {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .shared = shared,
+            .team_images = std.AutoHashMap(i32, vaxis.Image).init(allocator),
+        };
+    }
+
+    fn deinit(self: *App, vx: *vaxis.Vaxis, tty: *vaxis.Tty) void {
+        var images = self.team_images.valueIterator();
+        while (images.next()) |image| vx.freeImage(tty.writer(), image.imageId());
+        self.team_images.deinit();
+    }
+
+    fn loadTeamImages(self: *App, vx: *vaxis.Vaxis, tty: *vaxis.Tty) !void {
+        if (!vx.caps.kitty_graphics) return;
+
+        const state = self.shared.lock();
+        defer self.shared.unlock();
+        for (state.teams.items) |team| {
+            const logo = team.logo orelse continue;
+            if (self.team_images.contains(team.id)) continue;
+
+            const image = try loadTeamImage(self.allocator, vx, tty, logo);
+            errdefer vx.freeImage(tty.writer(), image.imageId());
+            try self.team_images.put(team.id, image);
+        }
+    }
 
     fn handleKey(self: *App, key: vaxis.Key) bool {
         return switch (self.screen) {
@@ -79,7 +112,7 @@ const App = struct {
         const state = self.shared.lock();
         defer self.shared.unlock();
 
-        if (window.width < 48 or window.height < 14) {
+        if (window.width < 48 or window.height < 18) {
             printCentered(window, window.height / 2, "Terminal is too small", error_style);
             return;
         }
@@ -128,7 +161,9 @@ pub fn run(
         worker.await(init.io);
     }
 
-    var app: App = .{ .io = init.io, .shared = shared };
+    var app: App = .init(allocator, init.io, shared);
+    defer app.deinit(&vx, &tty);
+    try app.loadTeamImages(&vx, &tty);
     app.draw(vx.window());
     try vx.render(tty.writer());
 
@@ -139,28 +174,47 @@ pub fn run(
             .winsize => |winsize| try vx.resize(allocator, tty.writer(), winsize),
             .draft_update, .tick => {},
         }
+        try app.loadTeamImages(&vx, &tty);
         app.draw(vx.window());
         try vx.render(tty.writer());
     }
 }
 
+fn loadTeamImage(
+    allocator: std.mem.Allocator,
+    vx: *vaxis.Vaxis,
+    tty: *vaxis.Tty,
+    logo: []const u8,
+) !vaxis.Image {
+    if (!svg.isSvg(logo)) return vx.loadImage(allocator, tty.writer(), .{ .mem = logo });
+
+    const png = try svg.renderPng(allocator, logo, 96, 96);
+    defer allocator.free(png);
+    return vx.loadImage(allocator, tty.writer(), .{ .mem = png });
+}
+
 fn drawMain(app: *const App, state: *const draft.State, window: vaxis.Window) void {
-    drawTeamBar(state, app.focused_team_id, window.child(.{
-        .height = 3,
+    drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
+        .height = 7,
     }));
 
     const content = window.child(.{
-        .y_off = 4,
-        .height = window.height -| 7,
+        .y_off = 8,
+        .height = window.height -| 11,
     });
     drawAuction(state, app.io, content);
     drawFooter(state, window);
 }
 
-fn drawTeamBar(state: *const draft.State, focused_team_id: ?i32, window: vaxis.Window) void {
+fn drawTeamBar(
+    state: *const draft.State,
+    team_images: *const std.AutoHashMap(i32, vaxis.Image),
+    focused_team_id: ?i32,
+    window: vaxis.Window,
+) void {
     const team_count = state.teams.items.len;
     if (team_count == 0) {
-        printCentered(window, 1, "Loading teams...", muted);
+        printCentered(window, 3, "Loading teams...", muted);
         return;
     }
 
@@ -173,7 +227,7 @@ fn drawTeamBar(state: *const draft.State, focused_team_id: ?i32, window: vaxis.W
         const team_window = window.child(.{
             .x_off = @intCast(start),
             .width = width,
-            .height = 3,
+            .height = 7,
             .border = .{ .where = .all, .style = border_style },
         });
         const team_text = team_window.child(.{
@@ -186,6 +240,23 @@ fn drawTeamBar(state: *const draft.State, focused_team_id: ?i32, window: vaxis.W
             .text = team.name,
             .style = if (is_focused) selected else heading,
         }, .{ .wrap = .none });
+
+        if (team_images.get(team.id)) |image| {
+            const logo_width = @min(width -| 2, 6);
+            const logo = team_window.child(.{
+                .x_off = @intCast((width - logo_width) / 2),
+                .y_off = 2,
+                .width = logo_width,
+                .height = 3,
+            });
+            image.draw(logo, .{ .scale = .fit }) catch unreachable;
+        } else {
+            printCentered(team_window, 3, team.abbreviation, accent);
+        }
+
+        var budget_buffer: [24]u8 = undefined;
+        const budget = std.fmt.bufPrint(&budget_buffer, "${d}", .{team.remaining_budget}) catch unreachable;
+        printCentered(team_window, 5, budget, money);
         start = end;
     }
 }

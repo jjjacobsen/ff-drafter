@@ -29,12 +29,16 @@ pub const Purchase = struct {
 pub const Team = struct {
     id: i32,
     name: []u8,
+    abbreviation: []u8,
+    logo: ?[]u8 = null,
     draft_position: i32 = 0,
     remaining_budget: i32 = 0,
     roster: std.ArrayList(Purchase) = .empty,
 
     fn deinit(self: *Team, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
+        allocator.free(self.abbreviation);
+        if (self.logo) |logo| allocator.free(logo);
         self.roster.deinit(allocator);
     }
 };
@@ -91,11 +95,20 @@ pub const State = struct {
         self.status_message = message;
     }
 
-    pub fn addTeam(self: *State, id: i32, name: []const u8) !void {
+    pub fn addTeam(self: *State, id: i32, name: []const u8, abbreviation: []const u8) !void {
+        const owned_name = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(owned_name);
+        const owned_abbreviation = try self.allocator.dupe(u8, abbreviation);
+        errdefer self.allocator.free(owned_abbreviation);
         try self.teams.append(self.allocator, .{
             .id = id,
-            .name = try self.allocator.dupe(u8, name),
+            .name = owned_name,
+            .abbreviation = owned_abbreviation,
         });
+    }
+
+    pub fn setTeamLogo(self: *State, id: i32, logo: []u8) void {
+        self.teams.items[self.teamIndexById(id).?].logo = logo;
     }
 
     pub fn addPlayer(

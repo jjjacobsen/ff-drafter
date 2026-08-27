@@ -25,7 +25,7 @@ It reads `espn_s2` and `SWID` from `.env`
 
 ## Main screen
 
-The top bar contains all teams in draft order
+The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, and remaining auction budget. Terminals without Kitty graphics support show the team abbreviation instead of the logo
 
 The center panel shows one of these states:
 

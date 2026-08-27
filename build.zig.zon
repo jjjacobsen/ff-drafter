@@ -39,6 +39,14 @@
         .websocket = .{
             .path = "vendor/websocket",
         },
+        .lunasvg = .{
+            .url = "https://github.com/sammycage/lunasvg/archive/refs/tags/v3.5.0.tar.gz",
+            .hash = "N-V-__8AALTnFAB93VPkBtGKCE69YdGkTIrugOr7GYqsTi4U",
+        },
+        .plutovg = .{
+            .url = "https://github.com/sammycage/plutovg/archive/refs/tags/v1.3.0.tar.gz",
+            .hash = "N-V-__8AAEAhEABBIAtLpI69qbQWVp0phNJM10hzIeEGU7K3",
+        },
     },
     .paths = .{
         "build.zig",

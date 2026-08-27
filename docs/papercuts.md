@@ -19,3 +19,7 @@ Closing `websocket.Client` from the UI thread while the worker was reading cause
 ## 2026-08-26: A scripted pseudo-terminal did not answer Vaxis status queries
 
 The macOS `script` command provides a pseudo-terminal but not a terminal emulator. Vaxis shutdown waited for its input reader after sending a device status query. Sending a device status response through the pseudo-terminal input allowed headless navigation validation to finish cleanly
+
+## 2026-08-27: Uploaded ESPN team logos require authentication
+
+Team logos from `mystique-api.fantasy.espn.com` returned HTTP 401 while custom and vector logo hosts were public. Sending the same ESPN cookies used for league data to the Mystique API unblocked uploaded team logos
