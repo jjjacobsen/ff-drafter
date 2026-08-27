@@ -1,61 +1,22 @@
 const std = @import("std");
-const vaxis = @import("vaxis");
-const vxfw = vaxis.vxfw;
-
-const Model = struct {
-    text: vxfw.Text,
-    center: vxfw.Center,
-
-    fn widget(self: *Model) vxfw.Widget {
-        return .{
-            .userdata = self,
-            .eventHandler = typeErasedEventHandler,
-            .drawFn = typeErasedDrawFn,
-        };
-    }
-
-    fn typeErasedEventHandler(
-        ptr: *anyopaque,
-        ctx: *vxfw.EventContext,
-        event: vxfw.Event,
-    ) anyerror!void {
-        _ = ptr;
-        switch (event) {
-            .key_press => |key| {
-                if (key.matches('q', .{}) or key.matches('c', .{ .ctrl = true })) {
-                    ctx.quit = true;
-                }
-            },
-            else => {},
-        }
-    }
-
-    fn typeErasedDrawFn(
-        ptr: *anyopaque,
-        ctx: vxfw.DrawContext,
-    ) std.mem.Allocator.Error!vxfw.Surface {
-        const self: *Model = @ptrCast(@alignCast(ptr));
-        var surface = try self.center.draw(ctx);
-        surface.widget = self.widget();
-        return surface;
-    }
-};
+const config_module = @import("config.zig");
+const draft = @import("draft.zig");
+const tui = @import("tui.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-
-    var buffer: [1024]u8 = undefined;
-    var app: vxfw.App = try .init(init.io, allocator, init.environ_map, &buffer);
-    defer app.deinit();
-
-    const model = try allocator.create(Model);
-    defer allocator.destroy(model);
-
-    model.text = .{
-        .text = "FF Drafter\n\nPress q to quit",
-        .text_align = .center,
+    var args = try init.minimal.args.iterateAllocator(init.gpa);
+    defer args.deinit();
+    _ = args.next();
+    const draft_url = args.next() orelse {
+        std.debug.print("usage: ff-drafter '<ESPN draft URL>'\n", .{});
+        std.process.exit(1);
     };
-    model.center = .{ .child = model.text.widget() };
 
-    try app.run(model.widget(), .{});
+    var config = try config_module.Config.load(init.gpa, init.io, draft_url);
+    defer config.deinit();
+
+    var shared = try draft.Shared.init(init.io, init.gpa, config.team_id);
+    defer shared.deinit();
+
+    try tui.run(init, &shared, &config);
 }

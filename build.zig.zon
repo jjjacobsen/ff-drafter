@@ -37,16 +37,15 @@
             .hash = "vaxis-0.6.0-BWNV_LC4CwBka_bJk8SOXqzCM-nyQH00jzdL0kUhGwRE",
         },
         .websocket = .{
-            .url = "git+https://github.com/karlseguin/websocket.zig.git#efa879736bd438bea8b86a91f220ba408de57273",
-            .hash = "websocket-0.1.0-ZPISdWoTBQA8iviFsepUZiKrmT-oEyc-BwfbVzYwu7LO",
+            .path = "vendor/websocket",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "docs",
+        "README.md",
         "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "vendor",
     },
 }
