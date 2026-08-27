@@ -304,8 +304,30 @@ fn drawTeamBar(
             printCentered(team_window, 3, team.abbreviation, accent);
         }
 
-        const budget = std.fmt.allocPrint(frame_allocator, "${d}", .{team.remaining_budget}) catch unreachable;
-        printCentered(team_window, 5, budget, money);
+        const spend = teamSpend(state, &team);
+        const difference = spend.espn - spend.real;
+        const budget = std.fmt.allocPrint(frame_allocator, "${d} • ", .{team.remaining_budget}) catch unreachable;
+        const difference_text = if (difference >= 0)
+            std.fmt.allocPrint(frame_allocator, "+${d}", .{difference}) catch unreachable
+        else
+            std.fmt.allocPrint(frame_allocator, "-${d}", .{-difference}) catch unreachable;
+        const budget_width = team_window.gwidth(budget);
+        const difference_width = team_window.gwidth(difference_text);
+        const total_width = budget_width + difference_width;
+        const budget_col = if (total_width < team_window.width) (team_window.width - total_width) / 2 else 0;
+        _ = team_window.printSegment(.{ .text = budget, .style = money }, .{
+            .row_offset = 5,
+            .col_offset = budget_col,
+            .wrap = .none,
+        });
+        _ = team_window.printSegment(.{
+            .text = difference_text,
+            .style = if (difference >= 0) money else error_style,
+        }, .{
+            .row_offset = 5,
+            .col_offset = budget_col + budget_width,
+            .wrap = .none,
+        });
 
         if (state.recent_sale) |sale| {
             if (sale.team_id == team.id and now_ms - sale.sold_at_ms < 3_000) {
@@ -492,23 +514,34 @@ fn drawTeam(
     ) catch unreachable;
     printCentered(window, 3, budget, money);
 
-    var espn_spend: i32 = 0;
-    var real_spend: i32 = 0;
-    for (team.roster.items) |purchase| {
-        real_spend += purchase.cost;
-        espn_spend += state.players.get(purchase.player_id).?.estimated_price;
-    }
-    const difference = espn_spend - real_spend;
+    const spend = teamSpend(state, &team);
+    const difference = spend.espn - spend.real;
     const difference_text = if (difference >= 0)
         std.fmt.allocPrint(frame_allocator, "+${d}", .{difference}) catch unreachable
     else
         std.fmt.allocPrint(frame_allocator, "-${d}", .{-difference}) catch unreachable;
     const totals = std.fmt.allocPrint(
         frame_allocator,
-        "ESPN spend ${d}  •  real spend ${d}  •  diff {s}",
-        .{ espn_spend, real_spend, difference_text },
+        "ESPN ${d}  •  real ${d}  •  diff ",
+        .{ spend.espn, spend.real },
     ) catch unreachable;
-    printCentered(window, 4, totals, details_style);
+    const totals_width = window.gwidth(totals);
+    const difference_width = window.gwidth(difference_text);
+    const summary_width = totals_width + difference_width;
+    const totals_col = if (summary_width < window.width) (window.width - summary_width) / 2 else 0;
+    _ = window.printSegment(.{ .text = totals, .style = details_style }, .{
+        .row_offset = 4,
+        .col_offset = totals_col,
+        .wrap = .none,
+    });
+    _ = window.printSegment(.{
+        .text = difference_text,
+        .style = if (difference >= 0) money else error_style,
+    }, .{
+        .row_offset = 4,
+        .col_offset = totals_col + totals_width,
+        .wrap = .none,
+    });
 
     if (window.height < roster_size + 13) {
         printCentered(window, 7, "Terminal is too short for the full roster", error_style);
@@ -653,6 +686,20 @@ fn purchaseForRosterSlot(team: *const draft.Team, slot_id: i32, occurrence: usiz
         current += 1;
     }
     return null;
+}
+
+const TeamSpend = struct {
+    espn: i32 = 0,
+    real: i32 = 0,
+};
+
+fn teamSpend(state: *const draft.State, team: *const draft.Team) TeamSpend {
+    var spend: TeamSpend = .{};
+    for (team.roster.items) |purchase| {
+        spend.real += purchase.cost;
+        spend.espn += state.players.get(purchase.player_id).?.estimated_price;
+    }
+    return spend;
 }
 
 fn drawFooter(state: *const draft.State, window: vaxis.Window) void {

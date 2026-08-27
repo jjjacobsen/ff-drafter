@@ -27,7 +27,7 @@ Starting the application enables bidding and nominations immediately after live 
 
 ## Main screen
 
-The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, and remaining auction budget. A green line and the current bid amount appear below the current high bidder. They move when another team takes the lead. For three seconds after a purchase, the winning team box also shows the price and player name. Terminals without Kitty graphics support show the team abbreviation instead of the logo
+The top bar contains all teams in draft order. Each team box shows its name, ESPN team logo, remaining auction budget, and the difference between ESPN value and real spend. The difference is green when it is positive and red when it is negative. A green line and the current bid amount appear below the current high bidder. They move when another team takes the lead. For three seconds after a purchase, the winning team box also shows the price and player name. Terminals without Kitty graphics support show the team abbreviation instead of the logo
 
 The center panel shows one of these states:
 
