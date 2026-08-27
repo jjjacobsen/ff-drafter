@@ -9,6 +9,9 @@ const Config = config_module.Config;
 const player_filter =
     \\{"players":{"limit":2000,"sortDraftRanks":{"sortPriority":1,"sortAsc":true,"value":"PPR"}}}
 ;
+const roster_slot_order = [_]i32{
+    0, 1, 2, 3, 4, 5, 6, 23, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24, 20,
+};
 
 pub fn run(
     io: std.Io,
@@ -77,10 +80,21 @@ fn loadCatalog(
     const root = parsed.value.object;
     const teams = root.get("teams").?.array.items;
     const players = root.get("players").?.array.items;
+    const lineup_slot_counts = root.get("settings").?.object
+        .get("rosterSettings").?.object
+        .get("lineupSlotCounts").?.object;
 
     {
         const state = shared.lock();
         defer shared.unlock();
+
+        state.resetRosterSlots();
+        for (roster_slot_order) |slot_id| {
+            var slot_buffer: [8]u8 = undefined;
+            const slot = std.fmt.bufPrint(&slot_buffer, "{d}", .{slot_id}) catch unreachable;
+            const count: usize = @intCast(lineup_slot_counts.get(slot).?.integer);
+            for (0..count) |_| try state.addRosterSlot(slot_id);
+        }
 
         for (teams) |team_value| {
             const team = team_value.object;

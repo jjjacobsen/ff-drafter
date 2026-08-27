@@ -35,3 +35,7 @@ Team logos from `mystique-api.fantasy.espn.com` returned HTTP 401 while custom a
 ## 2026-08-27: Zig 0.16 removed `std.fs.File.stdout`
 
 A temporary clock-format validation failed because the old stdout API no longer exists. Using `std.debug.print` confirmed that unsigned seconds format as `0:04` and `0:11`
+
+## 2026-08-27: Ended ESPN draft league data returned 404
+
+The previous league URL stopped exposing `draftInit` after the draft ended, so its roster configuration could not be inspected. A new live league confirmed 15 draftable roster slots per team: nine starters and six bench slots, with two IR slots excluded from the auction roster

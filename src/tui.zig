@@ -428,8 +428,14 @@ fn drawTeam(
     ) catch unreachable;
     printCentered(window, 3, budget, money);
 
+    const roster_size = state.roster_slots.items.len;
+    if (window.height < roster_size + 11) {
+        printCentered(window, 6, "Terminal is too short for the full roster", error_style);
+        return;
+    }
+
     const table_width = @min(window.width -| 4, 86);
-    const table_height = @min(window.height -| 8, @as(u16, @intCast(@max(team.roster.items.len + 4, 7))));
+    const table_height: u16 = @intCast(roster_size + 5);
     const table = window.child(.{
         .x_off = @intCast((window.width - table_width) / 2),
         .y_off = 5,
@@ -438,14 +444,14 @@ fn drawTeam(
         .border = .{ .where = .all, .style = muted },
     });
 
-    _ = table.printSegment(.{ .text = "POS", .style = heading }, .{
+    _ = table.printSegment(.{ .text = "SLOT", .style = heading }, .{
         .row_offset = 1,
         .col_offset = 2,
         .wrap = .none,
     });
     _ = table.printSegment(.{ .text = "PLAYER", .style = heading }, .{
         .row_offset = 1,
-        .col_offset = 10,
+        .col_offset = 12,
         .wrap = .none,
     });
     _ = table.printSegment(.{ .text = "COST", .style = heading }, .{
@@ -462,42 +468,88 @@ fn drawTeam(
     });
     divider.fill(.{ .char = .{ .grapheme = "─", .width = 1 }, .style = muted });
 
-    if (team.roster.items.len == 0) {
-        printCentered(table, 4, "No players drafted yet", muted);
-    } else {
-        const visible_rows = table.height -| 4;
-        for (team.roster.items[0..@min(team.roster.items.len, visible_rows)], 0..) |purchase, index| {
-            const row: u16 = @intCast(index + 3);
-            const player = state.players.get(purchase.player_id);
-            const position = if (player) |value| value.position else "--";
-            const name = if (player) |value|
-                value.name
-            else
-                std.fmt.allocPrint(frame_allocator, "Player {d}", .{purchase.player_id}) catch unreachable;
+    for (state.roster_slots.items, 0..) |slot_id, index| {
+        const row: u16 = @intCast(index + 3);
+        const slot_style = if (slot_id == 20) muted else accent;
+        _ = table.printSegment(.{ .text = rosterSlotName(slot_id), .style = slot_style }, .{
+            .row_offset = row,
+            .col_offset = 2,
+            .wrap = .none,
+        });
 
-            _ = table.printSegment(.{ .text = position, .style = accent }, .{
-                .row_offset = row,
-                .col_offset = 2,
-                .wrap = .none,
-            });
-            const player_name = table.child(.{
-                .x_off = 10,
-                .y_off = @intCast(row),
-                .width = table.width -| 20,
-                .height = 1,
-            });
-            _ = player_name.printSegment(.{ .text = name }, .{ .wrap = .none });
+        const occurrence = rosterSlotOccurrence(state.roster_slots.items[0..index], slot_id);
+        const purchase = purchaseForRosterSlot(&team, slot_id, occurrence) orelse continue;
+        const player = state.players.get(purchase.player_id);
+        const name = if (player) |value|
+            value.name
+        else
+            std.fmt.allocPrint(frame_allocator, "Player {d}", .{purchase.player_id}) catch unreachable;
 
-            const cost = std.fmt.allocPrint(frame_allocator, "${d}", .{purchase.cost}) catch unreachable;
-            _ = table.printSegment(.{ .text = cost, .style = money }, .{
-                .row_offset = row,
-                .col_offset = table.width -| @as(u16, @intCast(cost.len + 2)),
-                .wrap = .none,
-            });
-        }
+        const player_name = table.child(.{
+            .x_off = 12,
+            .y_off = @intCast(row),
+            .width = table.width -| 22,
+            .height = 1,
+        });
+        _ = player_name.printSegment(.{ .text = name }, .{ .wrap = .none });
+
+        const cost = std.fmt.allocPrint(frame_allocator, "${d}", .{purchase.cost}) catch unreachable;
+        _ = table.printSegment(.{ .text = cost, .style = money }, .{
+            .row_offset = row,
+            .col_offset = table.width -| @as(u16, @intCast(cost.len + 2)),
+            .wrap = .none,
+        });
     }
 
     printCentered(window, window.height -| 1, "esc/q back", muted);
+}
+
+fn rosterSlotName(slot_id: i32) []const u8 {
+    return switch (slot_id) {
+        0 => "QB",
+        1 => "TQB",
+        2 => "RB",
+        3 => "RB/WR",
+        4 => "WR",
+        5 => "WR/TE",
+        6 => "TE",
+        7 => "OP",
+        8 => "DT",
+        9 => "DE",
+        10 => "LB",
+        11 => "DL",
+        12 => "CB",
+        13 => "S",
+        14 => "DB",
+        15 => "DP",
+        16 => "D/ST",
+        17 => "K",
+        18 => "P",
+        19 => "HC",
+        20 => "BENCH",
+        22 => "RES",
+        23 => "FLEX",
+        24 => "EDR",
+        else => unreachable,
+    };
+}
+
+fn rosterSlotOccurrence(previous_slots: []const i32, slot_id: i32) usize {
+    var occurrence: usize = 0;
+    for (previous_slots) |previous_slot_id| {
+        if (previous_slot_id == slot_id) occurrence += 1;
+    }
+    return occurrence;
+}
+
+fn purchaseForRosterSlot(team: *const draft.Team, slot_id: i32, occurrence: usize) ?draft.Purchase {
+    var current: usize = 0;
+    for (team.roster.items) |purchase| {
+        if (purchase.slot_id != slot_id) continue;
+        if (current == occurrence) return purchase;
+        current += 1;
+    }
+    return null;
 }
 
 fn drawFooter(state: *const draft.State, window: vaxis.Window) void {

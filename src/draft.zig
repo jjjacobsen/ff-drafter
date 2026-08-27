@@ -68,6 +68,7 @@ pub const State = struct {
     allocator: std.mem.Allocator,
     user_team_id: i32,
     teams: std.ArrayList(Team) = .empty,
+    roster_slots: std.ArrayList(i32) = .empty,
     players: std.AutoHashMap(i32, Player),
     auction: Auction = .{},
     status: Status = .loading,
@@ -89,6 +90,7 @@ pub const State = struct {
     pub fn deinit(self: *State) void {
         for (self.teams.items) |*team| team.deinit(self.allocator);
         self.teams.deinit(self.allocator);
+        self.roster_slots.deinit(self.allocator);
 
         var players = self.players.valueIterator();
         while (players.next()) |player| player.deinit(self.allocator);
@@ -124,6 +126,14 @@ pub const State = struct {
 
     pub fn setTeamLogo(self: *State, id: i32, logo: []u8) void {
         self.teams.items[self.teamIndexById(id).?].logo = logo;
+    }
+
+    pub fn resetRosterSlots(self: *State) void {
+        self.roster_slots.clearRetainingCapacity();
+    }
+
+    pub fn addRosterSlot(self: *State, slot_id: i32) !void {
+        try self.roster_slots.append(self.allocator, slot_id);
     }
 
     pub fn addPlayer(

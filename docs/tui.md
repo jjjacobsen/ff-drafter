@@ -43,19 +43,15 @@ Press `esc` or `q` to exit
 
 The heading shows the team name and remaining auction budget
 
-The table contains:
+The table always shows every configured starter and bench slot from ESPN. Filled slots show the player name and purchase cost. Unfilled slots remain blank
 
-- Player position
-- Player name
-- Purchase cost
-
-The table is empty until the team buys a player
+The team screen redraws after every draft update, including purchases and lineup slot changes
 
 Press `esc` or `q` to return to the main screen
 
 ## State synchronization
 
-The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, all NFL players, positions, and ESPN auction values
+The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, roster slot counts, all NFL players, positions, and ESPN auction values
 
 The worker then gets a temporary draft security token and joins the ESPN WebSocket room
 
