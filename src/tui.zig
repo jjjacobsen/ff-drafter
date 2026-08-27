@@ -483,24 +483,43 @@ fn drawTeam(
     const team = state.teams.items[team_index];
 
     printCentered(window, 1, team.name, .{ .bold = true });
+    const roster_size = state.roster_slots.items.len;
+    const slots_remaining = roster_size -| team.roster.items.len;
     const budget = std.fmt.allocPrint(
         frame_allocator,
-        "${d} remaining",
-        .{team.remaining_budget},
+        "${d} remaining  •  {d} slots remaining",
+        .{ team.remaining_budget, slots_remaining },
     ) catch unreachable;
     printCentered(window, 3, budget, money);
 
-    const roster_size = state.roster_slots.items.len;
-    if (window.height < roster_size + 12) {
-        printCentered(window, 6, "Terminal is too short for the full roster", error_style);
+    var espn_spend: i32 = 0;
+    var real_spend: i32 = 0;
+    for (team.roster.items) |purchase| {
+        real_spend += purchase.cost;
+        espn_spend += state.players.get(purchase.player_id).?.estimated_price;
+    }
+    const difference = espn_spend - real_spend;
+    const difference_text = if (difference >= 0)
+        std.fmt.allocPrint(frame_allocator, "+${d}", .{difference}) catch unreachable
+    else
+        std.fmt.allocPrint(frame_allocator, "-${d}", .{-difference}) catch unreachable;
+    const totals = std.fmt.allocPrint(
+        frame_allocator,
+        "ESPN spend ${d}  •  real spend ${d}  •  diff {s}",
+        .{ espn_spend, real_spend, difference_text },
+    ) catch unreachable;
+    printCentered(window, 4, totals, details_style);
+
+    if (window.height < roster_size + 13) {
+        printCentered(window, 7, "Terminal is too short for the full roster", error_style);
         return;
     }
 
     const table_width = @min(window.width -| 4, 86);
-    const table_height = window.height -| 7;
+    const table_height = window.height -| 8;
     const table = window.child(.{
         .x_off = @intCast((window.width - table_width) / 2),
-        .y_off = 5,
+        .y_off = 6,
         .width = table_width,
         .height = table_height,
         .border = .{ .where = .all, .style = muted },
@@ -518,7 +537,12 @@ fn drawTeam(
     });
     _ = table.printSegment(.{ .text = "COST", .style = heading }, .{
         .row_offset = 1,
-        .col_offset = table.width -| 8,
+        .col_offset = table.width -| 16,
+        .wrap = .none,
+    });
+    _ = table.printSegment(.{ .text = "ESPN", .style = heading }, .{
+        .row_offset = 1,
+        .col_offset = table.width -| 6,
         .wrap = .none,
     });
 
@@ -550,7 +574,7 @@ fn drawTeam(
         const player_name = table.child(.{
             .x_off = 12,
             .y_off = @intCast(row),
-            .width = table.width -| 22,
+            .width = table.width -| 30,
             .height = 1,
         });
         _ = player_name.printSegment(.{ .text = name }, .{ .wrap = .none });
@@ -558,7 +582,15 @@ fn drawTeam(
         const cost = std.fmt.allocPrint(frame_allocator, "${d}", .{purchase.cost}) catch unreachable;
         _ = table.printSegment(.{ .text = cost, .style = money }, .{
             .row_offset = row,
-            .col_offset = table.width -| @as(u16, @intCast(cost.len + 2)),
+            .col_offset = table.width -| @as(u16, @intCast(cost.len + 12)),
+            .wrap = .none,
+        });
+
+        const espn_value = if (player) |value| value.estimated_price else 0;
+        const espn_price = std.fmt.allocPrint(frame_allocator, "${d}", .{espn_value}) catch unreachable;
+        _ = table.printSegment(.{ .text = espn_price, .style = details_style }, .{
+            .row_offset = row,
+            .col_offset = table.width -| @as(u16, @intCast(espn_price.len + 2)),
             .wrap = .none,
         });
     }
