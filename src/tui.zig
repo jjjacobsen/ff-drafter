@@ -10,6 +10,7 @@ const svg = @import("svg.zig");
 const accent: Cell.Style = .{ .fg = .{ .rgb = .{ 92, 200, 160 } }, .bold = true };
 const selected: Cell.Style = .{ .fg = .{ .rgb = .{ 255, 213, 79 } }, .bold = true };
 const muted: Cell.Style = .{ .fg = .{ .rgb = .{ 130, 140, 150 } }, .dim = true };
+const details_style: Cell.Style = .{ .fg = .{ .rgb = .{ 185, 190, 195 } } };
 const money: Cell.Style = .{ .fg = .{ .rgb = .{ 115, 210, 135 } }, .bold = true };
 const clock: Cell.Style = .{ .fg = .{ .rgb = .{ 255, 180, 75 } }, .bold = true };
 const error_style: Cell.Style = .{ .fg = .{ .rgb = .{ 245, 100, 100 } }, .bold = true };
@@ -34,6 +35,7 @@ const App = struct {
     player_image: ?PlayerImage = null,
     screen: Screen = .main,
     focused_team_id: ?i32 = null,
+    last_focused_team_id: ?i32 = null,
 
     fn init(allocator: std.mem.Allocator, io: std.Io, shared: *draft.Shared) App {
         return .{
@@ -105,7 +107,10 @@ const App = struct {
         if (team_count == 0) return false;
 
         if (key.matches('k', .{})) {
-            if (self.focused_team_id == null) self.focused_team_id = state.user_team_id;
+            if (self.focused_team_id == null) {
+                self.focused_team_id = self.last_focused_team_id orelse state.user_team_id;
+                self.last_focused_team_id = self.focused_team_id;
+            }
             return false;
         }
         if (key.matches('j', .{})) {
@@ -116,11 +121,13 @@ const App = struct {
             const index = state.teamIndexById(self.focused_team_id.?).?;
             const previous = if (index == 0) team_count - 1 else index - 1;
             self.focused_team_id = state.teams.items[previous].id;
+            self.last_focused_team_id = self.focused_team_id;
             return false;
         }
         if (key.matches('l', .{}) and self.focused_team_id != null) {
             const index = state.teamIndexById(self.focused_team_id.?).?;
             self.focused_team_id = state.teams.items[(index + 1) % team_count].id;
+            self.last_focused_team_id = self.focused_team_id;
             return false;
         }
         if (key.matches(vaxis.Key.enter, .{}) and self.focused_team_id != null) {
@@ -359,7 +366,6 @@ fn drawAuction(
 
         printCentered(content, 1, name, .{ .bold = true });
 
-        var details_window = content;
         if (player_image != null and player_image.?.player_id == player_id) {
             const image = player_image.?.image;
             const artwork_width = @min(content.width / 4, 12);
@@ -370,11 +376,6 @@ fn drawAuction(
                 .height = 8,
             });
             image.draw(artwork, .{ .scale = .fit }) catch unreachable;
-            details_window = content.child(.{
-                .x_off = @intCast(artwork_width + 2),
-                .width = content.width -| artwork_width -| 3,
-                .height = content.height,
-            });
         }
 
         const details = std.fmt.allocPrint(
@@ -382,19 +383,19 @@ fn drawAuction(
             "{s}  •  ESPN value ${d}",
             .{ position, estimated_price },
         ) catch unreachable;
-        printCentered(details_window, 3, details, muted);
+        printCentered(content, 3, details, details_style);
 
         const bid = std.fmt.allocPrint(frame_allocator, "${d}", .{state.auction.bid_amount}) catch unreachable;
-        printCentered(details_window, 5, bid, money);
+        printCentered(content, 5, bid, money);
 
         if (state.auction.bid_team_id) |team_id| {
             const bidder = teamName(state, team_id) orelse "Unknown team";
-            printCentered(details_window, 7, bidder, heading);
+            printCentered(content, 7, bidder, heading);
         }
 
         const remaining = state.clockRemainingMs(now_ms);
         const clock_text = formatClock(frame_allocator, remaining);
-        printCentered(details_window, 9, clock_text, clock);
+        printCentered(content, 9, clock_text, clock);
         return;
     }
 
@@ -500,8 +501,7 @@ fn drawTeam(
 }
 
 fn drawFooter(state: *const draft.State, window: vaxis.Window) void {
-    printCentered(window, window.height -| 2, state.status_message, statusStyle(state.status));
-    printCentered(window, window.height -| 1, "k teams  •  h/l move  •  j clear  •  enter open  •  esc/q quit", muted);
+    printCentered(window, window.height -| 1, state.status_message, statusStyle(state.status));
 }
 
 fn printCentered(window: vaxis.Window, row: u16, text: []const u8, style: Cell.Style) void {

@@ -33,9 +33,9 @@ The center panel shows one of these states:
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-The footer shows connection status and controls
+The footer shows connection status
 
-The screen starts without a focused team. Press `k` to focus the team from `teamId` in the draft URL. Press `h` or `l` to move through the teams, `j` to clear focus, and `enter` to open the focused team
+The screen starts without a focused team. Press `k` to focus the team from `teamId` in the draft URL. After moving with `h` or `l`, the application remembers that team when `j` clears focus and `k` restores it. Press `enter` to open the focused team
 
 Press `esc` or `q` to exit
 
