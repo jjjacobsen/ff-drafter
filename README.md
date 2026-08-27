@@ -1,6 +1,6 @@
 # FF Drafter
 
-A terminal application for watching an ESPN Fantasy Football auction draft
+A terminal application that autonomously manages an ESPN Fantasy Football auction draft
 
 ## Run
 
@@ -11,6 +11,8 @@ mise x -- zig build run -- 'https://fantasy.espn.com/football/draft?leagueId=LEA
 ```
 
 The application gets all room identifiers from the URL. Use the new URL each time you join a different practice draft
+
+Automation is always active. The application places optimizer-approved bids and nominates players when it connects to a live room
 
 ## Controls
 

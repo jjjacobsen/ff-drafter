@@ -2,7 +2,7 @@
 
 ## Scope
 
-The optimizer is a read-only advisor. It does not place bids or nominate players
+The optimizer calculates values and recommendations without performing network actions. The ESPN worker uses those recommendations to place bids and evaluate nominations
 
 It recalculates after synchronized draft updates and stores one recommendation for the current auction player in draft state. BID and CLOCK updates for the same player reuse the cached recommendation and only update the action
 
@@ -61,6 +61,10 @@ The forced assignment identifies the future players who fill the user's empty sl
 Integer remainders use deterministic player ID and slot order. If all eligible selected future weights are zero, discretionary dollars are divided equally. D/ST receives no discretionary dollars and remains capped at `$1`
 
 The nominee's allocation is its maximum bid, clamped to the legal maximum. Spending pace therefore moves the remaining budget toward the best players in the current exact roster assignment without treating ESPN utility as a predicted purchase cost
+
+## Nomination evaluation
+
+When it is the user's nomination turn, the application evaluates the highest 64 ESPN-valued undrafted players and keeps only players that the user can legally acquire for `$1`. If that group has no legal nominee, it continues through lower-valued players until it finds one. It prefers the player with the largest difference between ESPN value and marginal roster value. This selects a valuable player that contributes as little as possible to the user's optimized roster
 
 ## Safety rules
 

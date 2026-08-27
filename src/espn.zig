@@ -12,6 +12,28 @@ const player_filter =
 const roster_slot_order = [_]i32{
     0, 1, 2, 3, 4, 5, 6, 23, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24, 20,
 };
+const nomination_candidate_limit = 64;
+
+const Automation = struct {
+    bid_player_id: ?i32 = null,
+    bid_amount: i32 = 0,
+    bid_due_ms: i64 = 0,
+    bid_sent: bool = false,
+    nomination_pick_number: ?i32 = null,
+    nomination_player_id: i32 = 0,
+    nomination_due_ms: i64 = 0,
+    nomination_sent: bool = false,
+};
+
+const OutgoingAction = union(enum) {
+    bid: struct { player_id: i32, amount: i32 },
+    nominate: struct { player_id: i32, amount: i32 },
+};
+
+const NominationCandidate = struct {
+    player_id: i32,
+    espn_value: i32,
+};
 
 pub fn run(
     io: std.Io,
@@ -204,6 +226,7 @@ fn runConnection(
     const connected_at = std.Io.Timestamp.now(io, .awake).toMilliseconds();
     var last_ping_ms: i64 = 0;
     var last_tick_ms = connected_at;
+    var automation: Automation = .{};
 
     while (!shared.shouldStop()) {
         const now_awake_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
@@ -228,7 +251,11 @@ fn runConnection(
         const message = client.read() catch |err| switch (err) {
             error.Closed => return error.DraftConnectionClosed,
             else => return err,
-        } orelse continue;
+        } orelse {
+            const action_time_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
+            try runAutomation(allocator, &client, shared, &automation, action_time_ms);
+            continue;
+        };
         defer client.done(message);
 
         switch (message.type) {
@@ -236,6 +263,7 @@ fn runConnection(
                 io,
                 allocator,
                 http,
+                &client,
                 shared,
                 loop,
                 config,
@@ -254,6 +282,7 @@ fn handleMessage(
     io: std.Io,
     allocator: std.mem.Allocator,
     http: *std.http.Client,
+    client: *websocket.Client,
     shared: *draft.Shared,
     loop: *events.Loop,
     config: *const Config,
@@ -264,6 +293,8 @@ fn handleMessage(
     const now_awake_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
 
     if (std.mem.eql(u8, command, "INIT")) {
+        var disable_autodraft = "AUTODRAFT false".*;
+        try client.writeText(&disable_autodraft);
         const encoded = fields.next().?;
         var snapshot = try init_decoder.decodeBase64(allocator, encoded);
         defer snapshot.deinit();
@@ -400,6 +431,173 @@ fn handleMessage(
     }
 
     if (std.mem.eql(u8, command, "ERROR")) return error.EspnDraftError;
+}
+
+fn runAutomation(
+    allocator: std.mem.Allocator,
+    client: *websocket.Client,
+    shared: *draft.Shared,
+    automation: *Automation,
+    now_ms: i64,
+) !void {
+    var outgoing: ?OutgoingAction = null;
+
+    state_scope: {
+        const state = shared.lock();
+        defer shared.unlock();
+
+        if (state.status != .live) return;
+
+        if (state.auction.nomination_team_id == state.user_team_id) {
+            const remaining_ms = state.clockRemainingMs(now_ms);
+            if (remaining_ms <= 0) return;
+
+            if (automation.nomination_pick_number != state.next_pick_number) {
+                const player_id = try chooseNominee(allocator, state) orelse return;
+                const delay_ms = jitter(5_000, 10_000, entropy(now_ms, player_id, state.next_pick_number));
+                const latest_ms = now_ms + @max(remaining_ms - 3_000, 0);
+                automation.nomination_pick_number = state.next_pick_number;
+                automation.nomination_player_id = player_id;
+                automation.nomination_due_ms = @min(now_ms + delay_ms, latest_ms);
+                automation.nomination_sent = false;
+            }
+
+            if (!automation.nomination_sent and now_ms >= automation.nomination_due_ms) {
+                if (!state.isPlayerDrafted(automation.nomination_player_id)) {
+                    const recommendation = try state.calculatePlayerRecommendation(automation.nomination_player_id);
+                    if (recommendation.max_bid >= 1 and recommendation.legal_max >= 1) {
+                        outgoing = .{ .nominate = .{
+                            .player_id = automation.nomination_player_id,
+                            .amount = 1,
+                        } };
+                        automation.nomination_sent = true;
+                    } else {
+                        automation.nomination_pick_number = null;
+                    }
+                } else {
+                    automation.nomination_pick_number = null;
+                }
+            }
+        } else {
+            automation.nomination_pick_number = null;
+            automation.nomination_sent = false;
+        }
+
+        const player_id = state.auction.player_id orelse {
+            automation.bid_player_id = null;
+            automation.bid_sent = false;
+            break :state_scope;
+        };
+        const recommendation = state.recommendation;
+        const next_bid = if (state.auction.bid_team_id == null and state.auction.bid_amount == 0)
+            1
+        else
+            state.auction.bid_amount + 1;
+        const remaining_ms = state.clockRemainingMs(now_ms);
+
+        if (recommendation.player_id != player_id or
+            recommendation.action != .bid or
+            next_bid > recommendation.max_bid or
+            next_bid > recommendation.legal_max or
+            remaining_ms <= 0)
+        {
+            automation.bid_player_id = null;
+            automation.bid_sent = false;
+            break :state_scope;
+        }
+
+        if (automation.bid_player_id != player_id or automation.bid_amount != next_bid) {
+            const action_entropy = entropy(now_ms, player_id, next_bid);
+            const delay_ms = if (next_bid <= recommendation.target_bid)
+                jitter(2_000, 5_000, action_entropy)
+            else
+                jitter(1_000, 3_000, action_entropy);
+            const safety_ms = jitter(2_000, 3_000, action_entropy ^ 0xa0761d6478bd642f);
+            const latest_ms = now_ms + @max(remaining_ms - safety_ms, 0);
+
+            automation.bid_player_id = player_id;
+            automation.bid_amount = next_bid;
+            automation.bid_due_ms = @min(now_ms + delay_ms, latest_ms);
+            automation.bid_sent = false;
+        }
+
+        if (!automation.bid_sent and now_ms >= automation.bid_due_ms) {
+            outgoing = .{ .bid = .{ .player_id = player_id, .amount = next_bid } };
+            automation.bid_sent = true;
+        }
+    }
+
+    try sendAction(client, outgoing);
+}
+
+fn sendAction(client: *websocket.Client, outgoing: ?OutgoingAction) !void {
+    const action = outgoing orelse return;
+    var buffer: [64]u8 = undefined;
+    const message = switch (action) {
+        .bid => |bid| try std.fmt.bufPrint(&buffer, "BID {d} {d}", .{ bid.player_id, bid.amount }),
+        .nominate => |nomination| try std.fmt.bufPrint(
+            &buffer,
+            "NOMINATE {d} {d}",
+            .{ nomination.player_id, nomination.amount },
+        ),
+    };
+    try client.writeText(message);
+}
+
+fn chooseNominee(allocator: std.mem.Allocator, state: *const draft.State) !?i32 {
+    var candidates: std.ArrayList(NominationCandidate) = .empty;
+    defer candidates.deinit(allocator);
+
+    var players = state.players.iterator();
+    while (players.next()) |entry| {
+        if (state.isPlayerDrafted(entry.key_ptr.*)) continue;
+        try candidates.append(allocator, .{
+            .player_id = entry.key_ptr.*,
+            .espn_value = entry.value_ptr.estimated_price,
+        });
+    }
+    std.mem.sort(NominationCandidate, candidates.items, {}, nominationValueOrder);
+
+    var selected_player_id: ?i32 = null;
+    var selected_decoy_value: i32 = -1;
+    var selected_espn_value: i32 = -1;
+    for (candidates.items, 0..) |candidate, index| {
+        if (index >= nomination_candidate_limit and selected_player_id != null) break;
+        const recommendation = try state.calculatePlayerRecommendation(candidate.player_id);
+        if (recommendation.max_bid < 1 or recommendation.legal_max < 1) continue;
+        const decoy_value = candidate.espn_value - recommendation.marginal_value;
+        if (decoy_value > selected_decoy_value or
+            (decoy_value == selected_decoy_value and candidate.espn_value > selected_espn_value) or
+            (decoy_value == selected_decoy_value and candidate.espn_value == selected_espn_value and
+                (selected_player_id == null or candidate.player_id < selected_player_id.?)))
+        {
+            selected_player_id = candidate.player_id;
+            selected_decoy_value = decoy_value;
+            selected_espn_value = candidate.espn_value;
+        }
+    }
+    return selected_player_id;
+}
+
+fn nominationValueOrder(_: void, left: NominationCandidate, right: NominationCandidate) bool {
+    if (left.espn_value != right.espn_value) return left.espn_value > right.espn_value;
+    return left.player_id < right.player_id;
+}
+
+fn entropy(now_ms: i64, player_id: i32, amount: i32) u64 {
+    return @as(u64, @intCast(now_ms)) ^
+        (@as(u64, @as(u32, @bitCast(player_id))) << 32) ^
+        @as(u64, @as(u32, @bitCast(amount)));
+}
+
+fn jitter(min_ms: i64, max_ms: i64, seed: u64) i64 {
+    var value = seed;
+    value ^= value >> 12;
+    value ^= value << 25;
+    value ^= value >> 27;
+    value *%= 0x2545f4914f6cdd1d;
+    const range: u64 = @intCast(max_ms - min_ms + 1);
+    return min_ms + @as(i64, @intCast(value % range));
 }
 
 fn ensurePlayer(

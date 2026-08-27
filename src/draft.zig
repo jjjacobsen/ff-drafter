@@ -282,7 +282,10 @@ pub const State = struct {
             self.auction.bid_team_id = null;
             self.auction.bid_amount = 0;
         }
-        if (has_player) self.auction.player_id = player_id;
+        if (has_player) {
+            self.auction.player_id = player_id;
+            self.auction.nomination_team_id = null;
+        }
         if (team_id > 0) self.auction.bid_team_id = team_id;
         if (amount >= 0) self.auction.bid_amount = amount;
         self.setClock(time_remaining_ms, now_ms);
@@ -379,6 +382,21 @@ pub const State = struct {
 
     pub fn calculateRecommendation(self: *const State) !Recommendation {
         return optimizer.recommend(self.allocator, self, slotAcceptsPosition);
+    }
+
+    pub fn calculatePlayerRecommendation(self: *const State, player_id: i32) !Recommendation {
+        var candidate_state = self.*;
+        candidate_state.auction = .{ .player_id = player_id };
+        return optimizer.recommend(self.allocator, &candidate_state, slotAcceptsPosition);
+    }
+
+    pub fn isPlayerDrafted(self: *const State, player_id: i32) bool {
+        for (self.teams.items) |team| {
+            for (team.roster.items) |purchase| {
+                if (purchase.player_id == player_id) return true;
+            }
+        }
+        return false;
     }
 
     pub fn refreshRecommendation(self: *State, force: bool) !void {

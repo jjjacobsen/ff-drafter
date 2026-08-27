@@ -2,9 +2,9 @@
 
 ## Scope
 
-The application is a read-only watcher and bid advisor for ESPN Fantasy Football auction drafts
+The application watches and autonomously controls ESPN Fantasy Football auction drafts
 
-It does not nominate players, place bids, or change autodraft settings. ESPN must already have autodraft enabled if the room must continue without input
+Automation is always active. It places optimizer-approved bids and nominates players when it is the user's turn. It disables ESPN autodraft after every connection so ESPN cannot bid independently of the optimizer
 
 ## Start the application
 
@@ -22,6 +22,8 @@ The application parses these query parameters from the URL:
 - `memberId`
 
 It reads `espn_s2` and `SWID` from `.env`
+
+Starting the application enables bidding and nominations immediately after live state synchronization
 
 ## Main screen
 
@@ -78,13 +80,19 @@ After initialization, these messages update the state:
 
 The decision engine recalculates under the same state mutex after these updates. The UI only renders the stored recommendation and never runs optimization work itself
 
+After every `INIT`, the WebSocket worker sends `AUTODRAFT false` before it starts autonomous control. This prevents ESPN and the optimizer from controlling the same team at the same time
+
+The WebSocket worker schedules and sends all actions. At or below the optimizer target, a bid waits 2 to 5 seconds. Above the target but within the optimizer maximum, it waits 1 to 3 seconds. The schedule is capped by a randomized 2 to 3 second deadline threshold. A newer bid cancels the old schedule and creates a new one from the updated state
+
+Nominations wait 5 to 10 seconds and open at `$1`. The nomination evaluator starts with the 64 highest-valued available ESPN players and prefers the player with the most ESPN value that does not improve the user's optimized roster. It searches lower-valued players only when the first group has no legal `$1` nominee. Every action revalidates the turn, player, price, optimizer maximum, legal maximum, budget, and availability immediately before it is sent
+
 The WebSocket runs in one worker. The UI reads shared state under a mutex and receives Vaxis events when the state changes
 
 See [Dynamic roster optimizer](optimizer.md) for the planning model and bid-value definitions
 
 ## Connection behavior
 
-Only one ESPN connection can own the same member and team. Starting this application can disconnect the ESPN browser page
+Only one ESPN connection can own the same member and team. Starting this application can disconnect the ESPN browser page and can immediately affect the live draft after synchronization
 
 The worker sends ESPN application-level `PING` messages, responds to WebSocket ping frames, uses bounded reads, and reconnects after an unexpected close. Every reconnect gets a new security token and applies a new `INIT` snapshot
 

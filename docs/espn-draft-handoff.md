@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document records what was learned while connecting to a live ESPN Fantasy Football practice auction
+This document records what was learned while connecting to a live ESPN Fantasy Football practice auction and implementing the production draft controller
 
-The production draft watcher has not been built yet. The connection flow is confirmed and a temporary headless listener is running from `/tmp`
+The Zig application now synchronizes the live room, places optimizer-approved bids, and nominates players automatically. The temporary `/tmp` listener described below was used only during the initial protocol investigation
 
 ## What the user must provide
 
@@ -321,7 +321,7 @@ SELECT {playerId}
 LEAVE
 ```
 
-The production watcher must confirm all relevant state immediately before it sends an action:
+The production controller confirms all relevant state immediately before it sends an action:
 
 - It is our nomination or bidding turn
 - The player is still available
@@ -333,7 +333,7 @@ The production watcher must confirm all relevant state immediately before it sen
 
 ESPN should reject invalid commands, but the application must not depend on server rejection as its primary safety check
 
-The proof-of-concept listener was monitor-only. It sent keepalive traffic but did not nominate, bid, or change draft settings
+The proof-of-concept listener was monitor-only. The production Zig controller sends `AUTODRAFT false` after every `INIT`, then sends optimizer-controlled `NOMINATE` and `BID` commands
 
 ## Keepalive behavior
 
@@ -389,7 +389,7 @@ Do not treat the raw WebSocket implementation as the final architecture. The pro
 5. Fetch `draftSecurity`
 6. Construct the WebSocket URL without encoding the token delimiters
 7. Connect as the only client for the member and team
-8. Decode `INIT` and populate picks, team rosters, and remaining budgets
+8. Disable ESPN autodraft immediately after `INIT`, then decode the snapshot and populate picks, team rosters, and remaining budgets
 9. Apply `SOLD`, `ADJUSTED`, `UNDONE`, and `SLOT_CHANGED` updates
 10. Resolve missing player IDs from ESPN's athlete endpoint
 11. Validate turn, player, bid, roster, and budget state before every outgoing action

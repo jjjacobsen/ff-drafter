@@ -59,3 +59,11 @@ The optimizer's roster search has two functions that recursively call each other
 ## 2026-08-27: Combinatorial roster planning froze the live worker
 
 Live process PID 75403 stayed at 100% CPU for minutes. A macOS sample showed the network worker recursively trapped in `optimizer.Search.allocatePlan` inside `refreshRecommendation` while it held the state mutex, so `q` and escape waited forever for worker shutdown. Replacing budget and position-plan enumeration with two bounded rectangular Hungarian assignments removed the recursive search. Each solve is now `O(S²C)` for `S` slots and `C` retained candidates
+
+## 2026-08-27: Automation could act before applying a queued draft update
+
+The first automation loop evaluated stored state before reading the next WebSocket frame. A queued `BID`, `CLOCK`, or `SOLD` could therefore invalidate an action immediately before it was sent. Running automation only after a bounded socket read returns with no message ensures all already-queued updates are applied first
+
+## 2026-08-27: ESPN autodraft competed with optimizer bidding
+
+The autonomous controller joined the room but left ESPN autodraft unchanged. ESPN could therefore bid for the user's team above the optimizer maximum while the application correctly displayed a lower limit. Sending `AUTODRAFT false` immediately after every `INIT` leaves only the optimizer in control
