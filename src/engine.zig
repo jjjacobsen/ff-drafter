@@ -4,13 +4,39 @@ const draft = @import("draft.zig");
 const budget_gap_threshold = 20;
 const budget_adjustment_step = 10;
 const flex_penalty = 2;
-const bench_penalty = 4;
-const scarce_bench_penalty = 8;
+const starting_qb_reserve = 10;
+const impossible_cost: i64 = 1_000_000_000_000;
 
 pub const Decision = struct {
     max_bid: i32,
     next_bid: i32,
     price_allowed: bool,
+};
+
+pub const Nomination = struct {
+    player_id: i32,
+    amount: i32,
+};
+
+const Candidate = struct {
+    id: i32,
+    position: []const u8,
+    value: i32,
+};
+
+const CorePlan = struct {
+    allocator: std.mem.Allocator,
+    player_ids: []i32,
+    open_slots: usize,
+    target_per_slot: i32,
+
+    fn deinit(self: *const CorePlan) void {
+        self.allocator.free(self.player_ids);
+    }
+
+    fn contains(self: *const CorePlan, player_id: i32) bool {
+        return std.mem.indexOfScalar(i32, self.player_ids, player_id) != null;
+    }
 };
 
 pub fn decision(state: *const draft.State, player_id: i32) Decision {
@@ -31,38 +57,49 @@ pub fn maxBid(state: *const draft.State, player_id: i32) i32 {
     if (isPlayerDrafted(state, player_id)) return 0;
     const team_index = state.teamIndexById(state.user_team_id) orelse return 0;
     const team = &state.teams.items[team_index];
-    const empty_slots = state.roster_slots.items.len -| team.roster.items.len;
-    if (empty_slots == 0 or !hasOpenCompatibleSlot(state, team, player.position, false)) return 0;
+    const normal_max = normalMaxBid(state, team, &player);
+    if (normal_max == 0 or !isCorePosition(player.position)) return normal_max;
 
-    const legal_max = @max(team.remaining_budget - @as(i32, @intCast(empty_slots - 1)), 0);
-    if (legal_max == 0) return 0;
-
-    const roster_penalty: i32 = if (hasOpenDirectStarterSlot(state, team, player.position))
-        0
-    else if (hasOpenCompatibleSlot(state, team, player.position, true))
-        flex_penalty
-    else if (std.mem.eql(u8, player.position, "QB") or
-        std.mem.eql(u8, player.position, "D/ST") or
-        std.mem.eql(u8, player.position, "K"))
-        scarce_bench_penalty
-    else
-        bench_penalty;
-
-    const raw_max = adjustedEspnValue(state, team, player.estimated_price) - roster_penalty;
-    return @min(@max(raw_max, 1), legal_max);
+    const plan = buildCorePlan(state, team) catch unreachable;
+    defer plan.deinit();
+    return forcedMaxBid(state, team, player_id, &player, normal_max, &plan);
 }
 
-pub fn chooseNominee(state: *const draft.State) ?i32 {
+pub fn chooseNomination(state: *const draft.State) ?Nomination {
     const team_index = state.teamIndexById(state.user_team_id) orelse return null;
     const team = &state.teams.items[team_index];
+    const plan = buildCorePlan(state, team) catch unreachable;
+    defer plan.deinit();
+
+    if (plan.player_ids.len > 0 and (plan.open_slots == 1 or spendingPressureActive(state, team, &plan))) {
+        const player_id = bestPlannedPlayer(state, &plan);
+        const player = state.players.get(player_id).?;
+        const maximum = forcedMaxBid(
+            state,
+            team,
+            player_id,
+            &player,
+            normalMaxBid(state, team, &player),
+            &plan,
+        );
+        const amount = if (plan.open_slots == 1)
+            @max(@min(plan.target_per_slot, maximum), 1)
+        else
+            1;
+        return .{ .player_id = player_id, .amount = amount };
+    }
+
     var filled_choice: ?i32 = null;
     var fallback_choice: ?i32 = null;
-
     var players = state.players.iterator();
     while (players.next()) |entry| {
         const player_id = entry.key_ptr.*;
         const player = entry.value_ptr;
-        if (isPlayerDrafted(state, player_id) or maxBid(state, player_id) < 1) continue;
+        if (isPlayerDrafted(state, player_id) or
+            !hasOpenCompatibleSlot(state, team, player.position, false))
+        {
+            continue;
+        }
 
         if (betterNominee(state, player_id, fallback_choice)) fallback_choice = player_id;
         if (!hasOpenCompatibleSlot(state, team, player.position, true) and
@@ -72,16 +109,215 @@ pub fn chooseNominee(state: *const draft.State) ?i32 {
         }
     }
 
-    return filled_choice orelse fallback_choice;
+    const player_id = filled_choice orelse fallback_choice orelse return null;
+    return .{ .player_id = player_id, .amount = 1 };
 }
 
 pub fn startingRosterComplete(state: *const draft.State) bool {
     const team_index = state.teamIndexById(state.user_team_id) orelse return false;
     const team = &state.teams.items[team_index];
-    for (state.roster_slots.items) |slot_id| {
-        if (!isBenchSlot(slot_id) and slotHasSpace(state, team, slot_id)) return false;
+    for (state.roster_slots.items, 0..) |slot_id, index| {
+        if (!isBenchSlot(slot_id) and rosterSlotOccurrenceOpen(state, team, index)) return false;
     }
     return true;
+}
+
+fn normalMaxBid(state: *const draft.State, team: *const draft.Team, player: *const draft.Player) i32 {
+    const legal_max = legalMax(state, team);
+    if (legal_max == 0 or !hasOpenCompatibleSlot(state, team, player.position, false)) return 0;
+    if (std.mem.eql(u8, player.position, "D/ST") or std.mem.eql(u8, player.position, "K"))
+        return @min(legal_max, 1);
+    if (!hasOpenCompatibleSlot(state, team, player.position, true)) return @min(legal_max, 1);
+
+    const raw_max = adjustedEspnValue(state, team, player.estimated_price) -
+        rosterPenalty(state, team, player.position);
+    return @min(@max(raw_max, 1), legal_max);
+}
+
+fn forcedMaxBid(
+    state: *const draft.State,
+    team: *const draft.Team,
+    player_id: i32,
+    player: *const draft.Player,
+    normal_max: i32,
+    plan: *const CorePlan,
+) i32 {
+    if (!plan.contains(player_id)) return normal_max;
+
+    const cap = switch (plan.open_slots) {
+        0 => 0,
+        1 => plan.target_per_slot,
+        2 => player.estimated_price + 5,
+        3 => player.estimated_price + 2,
+        else => player.estimated_price,
+    };
+    const forced_value = @min(plan.target_per_slot, cap) - rosterPenalty(state, team, player.position);
+    return @max(normal_max, @min(@max(forced_value, 1), legalMax(state, team)));
+}
+
+fn spendingPressureActive(state: *const draft.State, team: *const draft.Team, plan: *const CorePlan) bool {
+    for (plan.player_ids) |player_id| {
+        const player = state.players.get(player_id).?;
+        const normal_max = normalMaxBid(state, team, &player);
+        if (forcedMaxBid(state, team, player_id, &player, normal_max, plan) > normal_max) return true;
+    }
+    return false;
+}
+
+fn buildCorePlan(state: *const draft.State, team: *const draft.Team) !CorePlan {
+    const allocator = state.allocator;
+    var open_slots: std.ArrayList(i32) = .empty;
+    defer open_slots.deinit(allocator);
+    var reserved_budget: i32 = 0;
+
+    for (state.roster_slots.items, 0..) |slot_id, index| {
+        if (!rosterSlotOccurrenceOpen(state, team, index)) continue;
+        if (isCoreSlot(slot_id)) {
+            try open_slots.append(allocator, slot_id);
+        } else {
+            reserved_budget += if (slot_id == 0 or slot_id == 1) starting_qb_reserve else 1;
+        }
+    }
+
+    var candidates: std.ArrayList(Candidate) = .empty;
+    defer candidates.deinit(allocator);
+    var players = state.players.iterator();
+    while (players.next()) |entry| {
+        if (isPlayerDrafted(state, entry.key_ptr.*) or
+            !isCorePosition(entry.value_ptr.position))
+        {
+            continue;
+        }
+        try candidates.append(allocator, .{
+            .id = entry.key_ptr.*,
+            .position = entry.value_ptr.position,
+            .value = entry.value_ptr.estimated_price,
+        });
+    }
+    std.mem.sort(Candidate, candidates.items, {}, candidateIdOrder);
+
+    const assignment = try maximumValueAssignment(allocator, open_slots.items, candidates.items);
+    defer allocator.free(assignment);
+    var player_ids: std.ArrayList(i32) = .empty;
+    errdefer player_ids.deinit(allocator);
+    for (assignment) |candidate_index| {
+        if (candidate_index < candidates.items.len)
+            try player_ids.append(allocator, candidates.items[candidate_index].id);
+    }
+
+    const target_per_slot = if (open_slots.items.len == 0)
+        0
+    else
+        @divFloor(
+            @max(team.remaining_budget - reserved_budget, 0),
+            @as(i32, @intCast(open_slots.items.len)),
+        );
+    return .{
+        .allocator = allocator,
+        .player_ids = try player_ids.toOwnedSlice(allocator),
+        .open_slots = open_slots.items.len,
+        .target_per_slot = target_per_slot,
+    };
+}
+
+fn maximumValueAssignment(
+    allocator: std.mem.Allocator,
+    slots: []const i32,
+    candidates: []const Candidate,
+) ![]usize {
+    const row_count = slots.len;
+    const column_count = candidates.len + row_count;
+    const result = try allocator.alloc(usize, row_count);
+    errdefer allocator.free(result);
+    if (row_count == 0) return result;
+
+    const u = try allocator.alloc(i64, row_count + 1);
+    defer allocator.free(u);
+    @memset(u, 0);
+    const v = try allocator.alloc(i64, column_count + 1);
+    defer allocator.free(v);
+    @memset(v, 0);
+    const matched_row = try allocator.alloc(usize, column_count + 1);
+    defer allocator.free(matched_row);
+    @memset(matched_row, 0);
+    const previous_column = try allocator.alloc(usize, column_count + 1);
+    defer allocator.free(previous_column);
+    const minimum = try allocator.alloc(i64, column_count + 1);
+    defer allocator.free(minimum);
+    const used = try allocator.alloc(bool, column_count + 1);
+    defer allocator.free(used);
+
+    for (1..row_count + 1) |row| {
+        matched_row[0] = row;
+        @memset(minimum, std.math.maxInt(i64));
+        @memset(used, false);
+        var column: usize = 0;
+
+        while (true) {
+            used[column] = true;
+            const current_row = matched_row[column];
+            var delta: i64 = std.math.maxInt(i64);
+            var next_column: usize = 0;
+
+            for (1..column_count + 1) |candidate_column| {
+                if (used[candidate_column]) continue;
+                const candidate_index = candidate_column - 1;
+                const cost = if (candidate_index >= candidates.len)
+                    @as(i64, 0)
+                else if (!draft.slotAcceptsPosition(
+                    slots[current_row - 1],
+                    candidates[candidate_index].position,
+                ))
+                    impossible_cost
+                else
+                    -@as(i64, candidates[candidate_index].value);
+                const reduced_cost = cost - u[current_row] - v[candidate_column];
+                if (reduced_cost < minimum[candidate_column]) {
+                    minimum[candidate_column] = reduced_cost;
+                    previous_column[candidate_column] = column;
+                }
+                if (minimum[candidate_column] < delta) {
+                    delta = minimum[candidate_column];
+                    next_column = candidate_column;
+                }
+            }
+
+            for (0..column_count + 1) |candidate_column| {
+                if (used[candidate_column]) {
+                    u[matched_row[candidate_column]] += delta;
+                    v[candidate_column] -= delta;
+                } else {
+                    minimum[candidate_column] -= delta;
+                }
+            }
+            column = next_column;
+            if (matched_row[column] == 0) break;
+        }
+
+        while (true) {
+            const prior = previous_column[column];
+            matched_row[column] = matched_row[prior];
+            column = prior;
+            if (column == 0) break;
+        }
+    }
+
+    for (1..column_count + 1) |column| {
+        if (matched_row[column] != 0) result[matched_row[column] - 1] = column - 1;
+    }
+    return result;
+}
+
+fn bestPlannedPlayer(state: *const draft.State, plan: *const CorePlan) i32 {
+    var best_id: ?i32 = null;
+    for (plan.player_ids) |player_id| {
+        if (betterNominee(state, player_id, best_id)) best_id = player_id;
+    }
+    return best_id.?;
+}
+
+fn candidateIdOrder(_: void, left: Candidate, right: Candidate) bool {
+    return left.id < right.id;
 }
 
 fn adjustedEspnValue(state: *const draft.State, user_team: *const draft.Team, espn_value: i32) i32 {
@@ -126,14 +362,24 @@ fn playerValueDiscount(espn_value: i32) i64 {
     return 0;
 }
 
+fn legalMax(state: *const draft.State, team: *const draft.Team) i32 {
+    const empty_slots = state.roster_slots.items.len -| team.roster.items.len;
+    if (empty_slots == 0) return 0;
+    return @max(team.remaining_budget - @as(i32, @intCast(empty_slots - 1)), 0);
+}
+
+fn rosterPenalty(state: *const draft.State, team: *const draft.Team, position: []const u8) i32 {
+    return if (hasOpenDirectStarterSlot(state, team, position)) 0 else flex_penalty;
+}
+
 fn hasOpenDirectStarterSlot(
     state: *const draft.State,
     team: *const draft.Team,
     position: []const u8,
 ) bool {
-    for (state.roster_slots.items) |slot_id| {
+    for (state.roster_slots.items, 0..) |slot_id, index| {
         if (isBenchSlot(slot_id) or !isDirectSlot(slot_id, position)) continue;
-        if (slotHasSpace(state, team, slot_id)) return true;
+        if (rosterSlotOccurrenceOpen(state, team, index)) return true;
     }
     return false;
 }
@@ -144,25 +390,37 @@ fn hasOpenCompatibleSlot(
     position: []const u8,
     starters_only: bool,
 ) bool {
-    for (state.roster_slots.items) |slot_id| {
+    for (state.roster_slots.items, 0..) |slot_id, index| {
         if (starters_only and isBenchSlot(slot_id)) continue;
         if (!draft.slotAcceptsPosition(slot_id, position)) continue;
-        if (slotHasSpace(state, team, slot_id)) return true;
+        if (rosterSlotOccurrenceOpen(state, team, index)) return true;
     }
     return false;
 }
 
-fn slotHasSpace(state: *const draft.State, team: *const draft.Team, slot_id: i32) bool {
-    var capacity: usize = 0;
-    for (state.roster_slots.items) |configured_slot| {
-        if (configured_slot == slot_id) capacity += 1;
+fn rosterSlotOccurrenceOpen(state: *const draft.State, team: *const draft.Team, index: usize) bool {
+    const slot_id = state.roster_slots.items[index];
+    var occurrence: usize = 0;
+    for (state.roster_slots.items[0..index]) |previous_slot| {
+        if (previous_slot == slot_id) occurrence += 1;
     }
 
     var occupied: usize = 0;
     for (team.roster.items) |purchase| {
         if (purchase.slot_id == slot_id) occupied += 1;
     }
-    return occupied < capacity;
+    return occupied <= occurrence;
+}
+
+fn isCorePosition(position: []const u8) bool {
+    return std.mem.eql(u8, position, "RB") or
+        std.mem.eql(u8, position, "WR") or
+        std.mem.eql(u8, position, "TE");
+}
+
+fn isCoreSlot(slot_id: i32) bool {
+    return slot_id == 2 or slot_id == 3 or slot_id == 4 or
+        slot_id == 5 or slot_id == 6 or slot_id == 23;
 }
 
 fn isDirectSlot(slot_id: i32, position: []const u8) bool {

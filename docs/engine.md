@@ -38,7 +38,9 @@ A player has no extra roster penalty while the user has an open starter slot for
 
 When only an open flex slot can start the player, the engine subtracts another `$2`. For example, a running back has this penalty after both RB slots are full while the flex slot remains open
 
-When the player can only use the bench, the engine subtracts another `$4`. QB, D/ST, and K use an `$8` bench penalty because a second player at these positions usually has much less value
+D/ST and K have a hard `$1` maximum. Any player who can only use the bench also has a hard `$1` maximum. This includes a backup QB
+
+A starting QB uses the normal value algorithm but does not receive priority-starter spending pressure
 
 The engine returns a zero maximum when no compatible roster slot remains
 
@@ -50,7 +52,35 @@ The maximum stays at its baseline through the first `$20` above that average. Af
 
 This adjustment is capped at the ESPN value until the user's budget is more than twice the other-team average. After that point, each complete `$10` above twice the average permits another `$1` above the ESPN value
 
-Roster penalties apply after the phase, player-value, and budget adjustments. This preserves the lower value of a player who can only use a flex or bench slot
+Roster penalties apply after the phase, player-value, and budget adjustments. This preserves the lower value of a player who can only use a flex slot
+
+### Priority-starter spending plan
+
+The engine directs its discretionary budget to RB, WR, TE, and RB/WR/TE flex starter slots
+
+It reserves `$10` for each open starting QB slot. It reserves `$1` for every other open non-priority slot, including D/ST, K, and bench slots
+
+```text
+priority budget = remaining budget - non-priority reserves
+target per slot = priority budget / open priority starter slots
+```
+
+Both calculations use whole dollars. The engine recalculates them after every roster or budget change
+
+The engine builds the highest-ESPN-value legal lineup for the open priority slots from all available players. A player receives spending pressure only when he belongs to this plan. Other players continue to use the normal value maximum
+
+The target per slot acts as a floor on the normal maximum. The number of open priority slots limits that floor:
+
+| Open priority slots | Forcing cap |
+| --- | ---: |
+| `4+` | ESPN value |
+| `3` | ESPN value `+$2` |
+| `2` | ESPN value `+$5` |
+| `1` | Full target per slot |
+
+The engine takes the higher of the normal maximum and the limited spending target. It then applies the flex penalty and legal maximum
+
+This pressure has no effect early when good players already have normal maximums above the target. It becomes stronger as priority slots close and the remaining budget must fit into fewer important starters
 
 ### Legal limit
 
@@ -72,12 +102,12 @@ After another team makes a counter bid, the engine waits one second before it bi
 
 ## Nominations
 
-When it is the user's turn, the engine waits five seconds before it nominates a player for `$1`
+When it is the user's turn, the engine waits five seconds before it nominates a player. After every starter slot is full, it waits one second instead
 
-After every starter slot is full, it waits one second instead
+The normal nomination strategy selects the highest ESPN-value player from a position with no compatible open starter slot. This sends valuable players that the user is less likely to need into the auction. If no starting position is filled, it nominates the available player with the highest ESPN value
 
-The engine first finds positions that have no compatible open starter slot. It nominates the available player with the highest ESPN value from those filled positions. This sends valuable players that the user is less likely to need into the auction
+When the priority spending floor raises any planned player's maximum, the engine stops nominating decoys. It nominates the highest ESPN-value player in the priority plan with a `$1` opening bid
 
-If no starting position is filled, it nominates the available player with the highest ESPN value. A lower player ID resolves an equal ESPN value
+When only one priority starter slot remains, the engine always nominates the best planned player. Its opening bid is the target per slot, limited by the player's final maximum. This gives the spending plan a way to use money even when no opponent raises the price
 
-The engine validates that the nominee is still available and that the user's roster and budget can accept the `$1` opening bid before it sends the nomination
+A lower player ID resolves an equal ESPN value. The engine validates that the nominee is still available and that the user's roster and budget can accept the opening bid before it sends the nomination

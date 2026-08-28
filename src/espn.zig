@@ -499,8 +499,11 @@ fn runAutomation(
             }
 
             if (!automation.nomination_sent and now_ms >= automation.nomination_due_ms) {
-                if (engine.chooseNominee(state)) |player_id| {
-                    outgoing = .{ .nominate = .{ .player_id = player_id, .amount = 1 } };
+                if (engine.chooseNomination(state)) |nomination| {
+                    outgoing = .{ .nominate = .{
+                        .player_id = nomination.player_id,
+                        .amount = nomination.amount,
+                    } };
                     automation.nomination_sent = true;
                 }
             }

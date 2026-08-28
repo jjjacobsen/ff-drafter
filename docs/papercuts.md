@@ -95,3 +95,7 @@ The decoded draft block restored its clock but discarded the integer between the
 ## 2026-08-27: Artwork requests blocked the draft command worker
 
 Team logos loaded before the WebSocket connection, and nominated-player artwork loaded on the WebSocket worker. Moving them to one background worker protected draft commands, but ten serial logo requests still made startup images slow. A four-worker artwork pool now loads optional images in parallel without blocking state updates or making every image wait for one slow host
+
+## 2026-08-27: Greedy priority planning mishandled hybrid slots
+
+A highest-player-first priority plan could put a WR in RB/WR, leave WR/TE open, and exclude a better RB when a different assignment had more total ESPN value. A bounded maximum-value assignment now selects the complete legal priority lineup before spending pressure or nomination selection uses it
