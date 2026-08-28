@@ -87,3 +87,11 @@ A live draft recommended `$94` for Jahmyr Gibbs and `$87` for Bijan Robinson. A 
 ## 2026-08-27: Zig 0.16 moved current-directory file reads to the I/O API
 
 A temporary live-catalog optimizer test used the old `std.fs.cwd().readFileAlloc` API and failed to compile. Zig 0.16 uses `std.Io.Dir.cwd().readFileAlloc` with an explicit `std.Io`. The independent live-data calculation and normal project build were sufficient, so the temporary test was removed
+
+## 2026-08-27: The INIT decoder discarded the active nomination team
+
+The decoded draft block restored its clock but discarded the integer between the expiration time and player ID. This is the nomination team ID. Retaining it lets autonomous nomination resume when the application joins during the user's nomination turn
+
+## 2026-08-27: Artwork requests blocked the draft command worker
+
+Team logos loaded before the WebSocket connection, and nominated-player artwork loaded on the WebSocket worker. A slow image host could delay a mid-draft connection or consume the final bidding seconds. A separate artwork worker now loads all optional images without blocking state updates or draft commands

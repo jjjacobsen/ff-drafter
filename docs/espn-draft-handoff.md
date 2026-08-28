@@ -4,7 +4,7 @@
 
 This document records what was learned while connecting to a live ESPN Fantasy Football practice auction and implementing the production draft controller
 
-The Zig application synchronizes the live room and retains the command transport for bids and nominations. No decision engine currently selects or schedules actions. The temporary `/tmp` listener described below was used only during the initial protocol investigation
+The Zig application synchronizes the live room and autonomously places bids and nominations. The temporary `/tmp` listener described below was used only during the initial protocol investigation
 
 ## What the user must provide
 
@@ -346,7 +346,7 @@ The production controller confirms all relevant state immediately before it send
 
 ESPN should reject invalid commands, but the application must not depend on server rejection as its primary safety check
 
-The proof-of-concept listener was monitor-only. The Zig controller reads the user's `autodraftTypeId` from `INIT` and sends `AUTODRAFT false` only when needed. Its command writer supports `NOMINATE` and `BID`, but no decision engine currently invokes those actions
+The proof-of-concept listener was monitor-only. The Zig controller reads the user's `autodraftTypeId` from `INIT` and sends `AUTODRAFT false` only when needed. The autonomous engine invokes `NOMINATE` and `BID` from the synchronized draft state
 
 ## Keepalive behavior
 
@@ -406,7 +406,7 @@ Do not treat the raw WebSocket implementation as the final architecture. The pro
 9. Apply `SOLD`, `ADJUSTED`, `UNDONE`, and `SLOT_CHANGED` updates
 10. Batch-resolve missing player IDs from the authenticated fantasy player endpoint
 11. Validate turn, player, bid, roster, and budget state before every outgoing action
-12. Send `NOMINATE` and `BID` commands when the draft strategy requests them
+12. Send `NOMINATE` and `BID` commands when the autonomous engine requests them
 13. Reconnect with backoff when ESPN closes an unexpected connection
 14. Stop cleanly when the draft reaches its completed state
 

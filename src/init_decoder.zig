@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const Block = struct {
+    nomination_team_id: i32,
     player_id: i32,
     high_bid_team_id: i32,
     high_bid_amount: i32,
@@ -99,12 +100,13 @@ fn decodeBlock(reader: *Reader) !?Block {
     _ = try reader.readI32();
     _ = try reader.readI32();
     const expiration_time_ms = try reader.readOptionalLong();
-    _ = try reader.readI32();
+    const nomination_team_id = try reader.readI32();
     const player_id = try reader.readI32();
     const high_bid_team_id = try reader.readI32();
     _ = try reader.readI32();
     const high_bid_amount = try reader.readI32();
     return .{
+        .nomination_team_id = nomination_team_id,
         .player_id = player_id,
         .high_bid_team_id = high_bid_team_id,
         .high_bid_amount = high_bid_amount,

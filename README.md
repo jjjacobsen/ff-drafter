@@ -1,6 +1,6 @@
 # FF Drafter
 
-A terminal application that watches an ESPN Fantasy Football auction draft
+A terminal application that autonomously controls an ESPN Fantasy Football auction draft
 
 ## Run
 
@@ -12,7 +12,7 @@ mise x -- zig build run -- 'https://fantasy.espn.com/football/draft?leagueId=LEA
 
 The application gets all room identifiers from the URL. Use the new URL each time you join a different practice draft
 
-The bid and nomination command transport remains available, but no decision engine currently selects or schedules actions
+The autonomous engine starts after live state synchronization. It places bids in the final eight seconds and nominates players when it is your turn
 
 ## Controls
 
@@ -25,5 +25,6 @@ The bid and nomination command transport remains available, but no decision engi
 
 ## Documentation
 
+- [Autonomous draft engine](docs/engine.md)
 - [TUI architecture and behavior](docs/tui.md)
 - [ESPN draft integration handoff](docs/espn-draft-handoff.md)

@@ -2,6 +2,7 @@ const std = @import("std");
 const websocket = @import("websocket");
 const config_module = @import("config.zig");
 const draft = @import("draft.zig");
+const engine = @import("engine.zig");
 const events = @import("events.zig");
 const init_decoder = @import("init_decoder.zig");
 
@@ -12,6 +13,17 @@ const player_filter =
 const roster_slot_order = [_]i32{
     0, 1, 2, 3, 4, 5, 6, 23, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24, 20,
 };
+const Automation = struct {
+    bid_player_id: ?i32 = null,
+    bid_amount: i32 = 0,
+    bid_team_id: ?i32 = null,
+    bid_due_ms: i64 = 0,
+    bid_sent: bool = false,
+    nomination_pick_number: ?i32 = null,
+    nomination_due_ms: i64 = 0,
+    nomination_sent: bool = false,
+};
+
 const OutgoingAction = union(enum) {
     bid: struct { player_id: i32, amount: i32 },
     nominate: struct { player_id: i32, amount: i32 },
@@ -27,6 +39,59 @@ pub fn run(
     runWorker(io, allocator, shared, loop, config) catch |err| {
         reportError(shared, loop, err);
     };
+}
+
+pub fn runArtwork(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    shared: *draft.Shared,
+    loop: *events.Loop,
+    config: *const Config,
+) void {
+    var http: std.http.Client = .{ .allocator = allocator, .io = io };
+    defer http.deinit();
+
+    while (!shared.shouldStop()) {
+        const player_id = player: {
+            const state = shared.lock();
+            defer shared.unlock();
+            break :player state.auction.player_id;
+        };
+        if (player_id) |id| {
+            ensureNominatedPlayer(&http, allocator, shared, loop, config, id) catch |err| {
+                std.log.warn("could not load player artwork: {s}", .{@errorName(err)});
+            };
+        }
+
+        const team_request = request: {
+            const state = shared.lock();
+            defer shared.unlock();
+            for (state.teams.items) |team| {
+                if (!state.requestTeamLogo(team.id)) continue;
+                break :request .{ .id = team.id, .url = team.logo_url };
+            }
+            break :request null;
+        };
+        if (team_request) |team| {
+            const logo = fetchEspn(&http, allocator, config, team.url, null) catch |err| {
+                std.log.warn("could not load logo for team {d}: {s}", .{ team.id, @errorName(err) });
+                continue;
+            };
+            if (shared.shouldStop()) {
+                allocator.free(logo);
+                return;
+            }
+            {
+                const state = shared.lock();
+                defer shared.unlock();
+                state.setTeamLogo(team.id, logo);
+            }
+            _ = loop.tryPostEvent(.draft_update) catch {};
+            continue;
+        }
+
+        io.sleep(.fromMilliseconds(250), .awake) catch return;
+    }
 }
 
 fn runWorker(
@@ -108,25 +173,11 @@ fn loadCatalog(
                 @intCast(team.get("id").?.integer),
                 team.get("name").?.string,
                 team.get("abbrev").?.string,
+                team.get("logo").?.string,
             );
         }
 
         try addFantasyPlayers(state, players);
-    }
-
-    for (teams) |team_value| {
-        if (shared.shouldStop()) return;
-
-        const team = team_value.object;
-        const logo = try fetchEspn(http, allocator, config, team.get("logo").?.string, null);
-        if (shared.shouldStop()) {
-            allocator.free(logo);
-            return;
-        }
-
-        const state = shared.lock();
-        defer shared.unlock();
-        state.setTeamLogo(@intCast(team.get("id").?.integer), logo);
     }
 
     if (shared.shouldStop()) return;
@@ -197,6 +248,7 @@ fn runConnection(
     const connected_at = std.Io.Timestamp.now(io, .awake).toMilliseconds();
     var last_ping_ms: i64 = 0;
     var last_tick_ms = connected_at;
+    var automation: Automation = .{};
     while (!shared.shouldStop()) {
         const now_awake_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
         if ((last_ping_ms == 0 and now_awake_ms - connected_at >= 1_000) or
@@ -220,7 +272,15 @@ fn runConnection(
         const message = client.read() catch |err| switch (err) {
             error.Closed => return error.DraftConnectionClosed,
             else => return err,
-        } orelse continue;
+        } orelse {
+            try runAutomation(
+                &client,
+                shared,
+                &automation,
+                std.Io.Timestamp.now(io, .awake).toMilliseconds(),
+            );
+            continue;
+        };
         defer client.done(message);
 
         switch (message.type) {
@@ -297,10 +357,6 @@ fn handleMessage(
         }
         _ = try loop.tryPostEvent(.draft_update);
 
-        if (snapshot.block) |block| {
-            if (block.player_id != -1 and block.player_id != 0)
-                try ensureNominatedPlayer(http, allocator, shared, loop, config, block.player_id);
-        }
         return;
     }
 
@@ -317,7 +373,6 @@ fn handleMessage(
             state.setBid(team_id, player_id, amount, remaining, now_awake_ms);
         }
         _ = try loop.tryPostEvent(.draft_update);
-        try ensureNominatedPlayer(http, allocator, shared, loop, config, player_id);
         return;
     }
 
@@ -335,8 +390,6 @@ fn handleMessage(
             state.setClockMessage(time, team_id, player_id, amount, now_awake_ms);
         }
         _ = try loop.tryPostEvent(.draft_update);
-        if (player_id != -1 and player_id != 0)
-            try ensureNominatedPlayer(http, allocator, shared, loop, config, player_id);
         return;
     }
 
@@ -416,6 +469,80 @@ fn handleMessage(
         _ = try loop.tryPostEvent(.draft_update);
         return;
     }
+}
+
+fn runAutomation(
+    client: *websocket.Client,
+    shared: *draft.Shared,
+    automation: *Automation,
+    now_ms: i64,
+) !void {
+    var outgoing: ?OutgoingAction = null;
+
+    state_scope: {
+        const state = shared.lock();
+        defer shared.unlock();
+        if (state.status != .live) return;
+
+        if (state.auction.nomination_team_id == state.user_team_id) {
+            const remaining_ms = state.clockRemainingMs(now_ms);
+            if (remaining_ms <= 0) return;
+
+            if (automation.nomination_pick_number != state.next_pick_number) {
+                const delay_ms: i64 = if (engine.startingRosterComplete(state)) 1_000 else 5_000;
+                automation.nomination_pick_number = state.next_pick_number;
+                automation.nomination_due_ms = @min(
+                    now_ms + delay_ms,
+                    now_ms + @max(remaining_ms - 1_000, 0),
+                );
+                automation.nomination_sent = false;
+            }
+
+            if (!automation.nomination_sent and now_ms >= automation.nomination_due_ms) {
+                if (engine.chooseNominee(state)) |player_id| {
+                    outgoing = .{ .nominate = .{ .player_id = player_id, .amount = 1 } };
+                    automation.nomination_sent = true;
+                }
+            }
+        } else {
+            automation.nomination_pick_number = null;
+            automation.nomination_sent = false;
+        }
+
+        const player_id = state.auction.player_id orelse {
+            automation.bid_player_id = null;
+            automation.bid_sent = false;
+            break :state_scope;
+        };
+        const bid = engine.decision(state, player_id);
+        const bid_changed = automation.bid_player_id != player_id or
+            automation.bid_amount != state.auction.bid_amount or
+            automation.bid_team_id != state.auction.bid_team_id;
+        if (bid_changed) {
+            const is_counter_bid = automation.bid_player_id == player_id;
+            automation.bid_player_id = player_id;
+            automation.bid_amount = state.auction.bid_amount;
+            automation.bid_team_id = state.auction.bid_team_id;
+            automation.bid_due_ms = now_ms + @as(i64, if (is_counter_bid) 1_000 else 0);
+            automation.bid_sent = false;
+        }
+
+        const remaining_ms = state.clockRemainingMs(now_ms);
+        if (state.auction.bid_team_id == state.user_team_id or
+            !bid.price_allowed or
+            remaining_ms <= 0 or
+            remaining_ms > 8_000 or
+            automation.bid_sent or
+            now_ms < automation.bid_due_ms)
+        {
+            break :state_scope;
+        }
+
+        outgoing = .{ .bid = .{ .player_id = player_id, .amount = bid.next_bid } };
+        automation.bid_sent = true;
+    }
+
+    try sendAction(client, outgoing);
 }
 
 fn sendAction(client: *websocket.Client, outgoing: ?OutgoingAction) !void {

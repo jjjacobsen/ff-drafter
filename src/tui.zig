@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const Cell = vaxis.Cell;
 const config_module = @import("config.zig");
 const draft = @import("draft.zig");
+const engine = @import("engine.zig");
 const espn = @import("espn.zig");
 const events = @import("events.zig");
 const svg = @import("svg.zig");
@@ -210,10 +211,18 @@ pub fn run(
         &loop,
         config,
     });
+    var artwork_worker = try init.io.concurrent(espn.runArtwork, .{
+        init.io,
+        allocator,
+        shared,
+        &loop,
+        config,
+    });
     defer {
         shared.stop.store(true, .release);
         vx.exitAltScreen(tty.writer()) catch {};
         worker.await(init.io);
+        artwork_worker.await(init.io);
     }
 
     var app: App = .init(allocator, init.io, shared);
@@ -449,14 +458,26 @@ fn drawAuction(
         const bid = std.fmt.allocPrint(frame_allocator, "${d}", .{state.auction.bid_amount}) catch unreachable;
         printCentered(content, 5, bid, money);
 
-        printCentered(content, 11, "tbd", details_style);
+        const decision = engine.decision(state, player_id);
+        const difference = decision.max_bid - estimated_price;
+        const maximum = if (difference > 0)
+            std.fmt.allocPrint(
+                frame_allocator,
+                "max ${d} +{d}",
+                .{ decision.max_bid, difference },
+            ) catch unreachable
+        else
+            std.fmt.allocPrint(
+                frame_allocator,
+                "max ${d} -{d}",
+                .{ decision.max_bid, -difference },
+            ) catch unreachable;
+        printCentered(content, 11, maximum, if (decision.price_allowed) accent else details_style);
 
         if (state.auction.bid_team_id) |team_id| {
             const bidder = teamName(state, team_id) orelse "Unknown team";
             printCentered(content, 7, bidder, heading);
         }
-
-        printCentered(content, 13, "tbd", details_style);
 
         const remaining = state.clockRemainingMs(now_ms);
         const clock_text = formatClock(frame_allocator, remaining);

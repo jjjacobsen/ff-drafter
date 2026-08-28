@@ -2,9 +2,9 @@
 
 ## Scope
 
-The application watches ESPN Fantasy Football auction drafts
+The application watches and autonomously controls ESPN Fantasy Football auction drafts
 
-The bid and nomination command transport remains in place, but no decision engine currently selects or schedules actions. When `INIT` reports that ESPN autodraft is enabled, the application disables ESPN autodraft
+The autonomous engine always places bids and nominations after live synchronization. When `INIT` reports that ESPN autodraft is enabled, the application disables ESPN autodraft
 
 ## Start the application
 
@@ -23,7 +23,7 @@ The application parses these query parameters from the URL:
 
 It reads `espn_s2` and `SWID` from `.env`
 
-Starting the application synchronizes the live draft state. It does not select bids or nominations
+Starting the application synchronizes the live draft state and then enables autonomous bidding and nominations
 
 ## Main screen
 
@@ -31,11 +31,11 @@ The top bar contains all teams in draft order. Each team box shows its name, ESP
 
 The center panel shows one of these states:
 
-- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, completed pick count, and decision placeholders
+- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, completed pick count, and engine maximum bid
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-Two decision lines appear below the player, current bid, leading team, and clock. Both lines show `tbd` until the new decision engine is implemented. ESPN auction value remains near the player name as informational context only
+One decision line appears below the player, current bid, leading team, and clock. It shows `max $XX -Y`, where `XX` is the current engine maximum and `Y` is its difference from the ESPN value. A maximum above the ESPN value uses `+Y`. The line is green when the next bid is within the maximum and gray when the next bid is too expensive
 
 The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads. Pressing `q` or `esc` opens an exit confirmation dialog. Press `y` or `enter` to exit, or press `n` or `esc` to cancel. A second `q` does not exit
 
@@ -64,7 +64,7 @@ The first `INIT` WebSocket message is Base64-encoded binary data. `src/init_deco
 - Draft order
 - Team budgets
 - Completed auction purchases and their normalized roster assignments
-- The current player and bid state
+- The current player and bid state, or the active nomination turn
 
 A future pick has `playerId = -1`. Other negative IDs are valid for team defenses and must not be treated as empty picks
 
@@ -78,15 +78,17 @@ After initialization, these messages update the state:
 - `UNDONE`
 - `SLOT_CHANGED`
 
-No decision engine runs after these updates
+The engine reads this synchronized state before every action. This lets it start during an active draft without separate history
 
 The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker sends `AUTODRAFT false` only when that value reports enabled autodraft, which prevents repeated no-op commands
 
-An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open and shows the complete error instead of reconnecting
+An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open, stops automation, and shows the complete error instead of reconnecting
 
-The WebSocket command writer still supports `BID` and `NOMINATE` actions. No code currently decides when to send them or which player and price to use
+The WebSocket worker waits until the final eight seconds to bid. It waits one second after a counter bid. Nominations wait five seconds, or one second after the starting roster is full. Every action is checked against the current player, turn, roster, budget, and clock before the worker sends it
 
-The WebSocket runs in one worker. The UI reads shared state under a mutex and receives Vaxis events when the state changes
+The WebSocket and autonomous engine run in one worker. A separate artwork worker loads optional team logos and player images, so image requests cannot delay draft commands. The UI reads shared state under a mutex and receives Vaxis events when the state changes
+
+See [Autonomous draft engine](engine.md) for the maximum bid formula and nomination rules
 
 ## Connection behavior
 
