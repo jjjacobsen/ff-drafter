@@ -12,7 +12,7 @@ const player_filter =
 const roster_slot_order = [_]i32{
     0, 1, 2, 3, 4, 5, 6, 23, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24, 20,
 };
-const nomination_candidate_limit = 64;
+const nomination_candidate_limit = 8;
 
 const Automation = struct {
     bid_player_id: ?i32 = null,
@@ -129,18 +129,7 @@ fn loadCatalog(
             );
         }
 
-        for (players) |player_value| {
-            const item = player_value.object;
-            const player = item.get("player").?.object;
-            const position_id: i32 = @intCast(player.get("defaultPositionId").?.integer);
-            try state.addPlayer(
-                @intCast(item.get("id").?.integer),
-                player.get("fullName").?.string,
-                positionName(position_id),
-                @intCast(player.get("proTeamId").?.integer),
-                @intCast(item.get("draftAuctionValue").?.integer),
-            );
-        }
+        try addFantasyPlayers(state, players);
     }
 
     for (teams) |team_value| {
@@ -304,13 +293,26 @@ fn handleMessage(
             break;
         }
 
-        for (snapshot.picks.items) |pick| {
-            if (pick.player_id != -1) try ensurePlayer(http, allocator, shared, config, pick.player_id);
+        var missing_player_ids: std.ArrayList(i32) = .empty;
+        defer missing_player_ids.deinit(allocator);
+        {
+            const state = shared.lock();
+            defer shared.unlock();
+            for (snapshot.picks.items) |pick| {
+                if (pick.player_id == -1 or state.hasPlayer(pick.player_id)) continue;
+                if (std.mem.indexOfScalar(i32, missing_player_ids.items, pick.player_id) == null)
+                    try missing_player_ids.append(allocator, pick.player_id);
+            }
+            if (snapshot.block) |block| {
+                if (block.player_id != -1 and block.player_id != 0 and
+                    !state.hasPlayer(block.player_id) and
+                    std.mem.indexOfScalar(i32, missing_player_ids.items, block.player_id) == null)
+                {
+                    try missing_player_ids.append(allocator, block.player_id);
+                }
+            }
         }
-        if (snapshot.block) |block| {
-            if (block.player_id != -1 and block.player_id != 0)
-                try ensurePlayer(http, allocator, shared, config, block.player_id);
-        }
+        try loadFantasyPlayers(http, allocator, shared, config, missing_player_ids.items);
 
         {
             const state = shared.lock();
@@ -480,7 +482,7 @@ fn runAutomation(
             if (!automation.nomination_sent and now_ms >= automation.nomination_due_ms) {
                 if (!state.isPlayerDrafted(automation.nomination_player_id)) {
                     const recommendation = try state.calculatePlayerRecommendation(automation.nomination_player_id);
-                    if (recommendation.max_bid >= 1 and recommendation.legal_max >= 1) {
+                    if (recommendation.max_bid >= 1) {
                         outgoing = .{ .nominate = .{
                             .player_id = automation.nomination_player_id,
                             .amount = 1,
@@ -513,7 +515,6 @@ fn runAutomation(
         if (recommendation.player_id != player_id or
             recommendation.action != .bid or
             next_bid > recommendation.max_bid or
-            next_bid > recommendation.legal_max or
             remaining_ms <= 0)
         {
             automation.bid_player_id = null;
@@ -523,10 +524,7 @@ fn runAutomation(
 
         if (automation.bid_player_id != player_id or automation.bid_amount != next_bid) {
             const action_entropy = entropy(now_ms, player_id, next_bid);
-            const delay_ms = if (next_bid <= recommendation.target_bid)
-                jitter(2_000, 5_000, action_entropy)
-            else
-                jitter(1_000, 3_000, action_entropy);
+            const delay_ms = jitter(2_000, 5_000, action_entropy);
             const safety_ms = jitter(2_000, 3_000, action_entropy ^ 0xa0761d6478bd642f);
             const latest_ms = now_ms + @max(remaining_ms - safety_ms, 0);
 
@@ -568,19 +566,25 @@ fn chooseNominee(allocator: std.mem.Allocator, state: *const draft.State) !?i32 
         if (state.isPlayerDrafted(entry.key_ptr.*)) continue;
         try candidates.append(allocator, .{
             .player_id = entry.key_ptr.*,
-            .espn_value = entry.value_ptr.estimated_price,
+            .espn_value = if (std.mem.eql(u8, entry.value_ptr.position, "D/ST"))
+                1
+            else
+                entry.value_ptr.estimated_price,
         });
     }
     std.mem.sort(NominationCandidate, candidates.items, {}, nominationValueOrder);
 
     var selected_player_id: ?i32 = null;
-    var selected_decoy_value: i32 = -1;
+    var selected_decoy_value: i32 = std.math.minInt(i32);
     var selected_espn_value: i32 = -1;
-    for (candidates.items, 0..) |candidate, index| {
-        if (index >= nomination_candidate_limit and selected_player_id != null) break;
+    var evaluated: usize = 0;
+    for (candidates.items) |candidate| {
+        if (evaluated == nomination_candidate_limit) break;
+        if (selected_player_id != null and candidate.espn_value - 1 <= selected_decoy_value) break;
         const recommendation = try state.calculatePlayerRecommendation(candidate.player_id);
-        if (recommendation.max_bid < 1 or recommendation.legal_max < 1) continue;
-        const decoy_value = candidate.espn_value - recommendation.marginal_value;
+        evaluated += 1;
+        if (recommendation.max_bid < 1) continue;
+        const decoy_value = recommendation.estimated_value - recommendation.max_bid;
         if (decoy_value > selected_decoy_value or
             (decoy_value == selected_decoy_value and candidate.espn_value > selected_espn_value) or
             (decoy_value == selected_decoy_value and candidate.espn_value == selected_espn_value and
@@ -628,27 +632,61 @@ fn ensurePlayer(
         if (state.hasPlayer(player_id)) return;
     }
 
+    try loadFantasyPlayers(http, allocator, shared, config, &.{player_id});
+}
+
+fn loadFantasyPlayers(
+    http: *std.http.Client,
+    allocator: std.mem.Allocator,
+    shared: *draft.Shared,
+    config: *const Config,
+    player_ids: []const i32,
+) !void {
+    if (player_ids.len == 0) return;
+
+    const base_url = try leagueBaseUrl(allocator, config);
+    defer allocator.free(base_url);
     const url = try std.fmt.allocPrint(
         allocator,
-        "https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/{d}",
-        .{player_id},
+        "{s}?view=draftInit&view=kona_player_info",
+        .{base_url},
     );
     defer allocator.free(url);
-    const body = try fetchEspn(http, allocator, config, url, null);
+
+    var filter: std.Io.Writer.Allocating = .init(allocator);
+    defer filter.deinit();
+    try filter.writer.writeAll("{\"players\":{\"filterIds\":{\"value\":[");
+    for (player_ids, 0..) |player_id, index| {
+        if (index != 0) try filter.writer.writeByte(',');
+        try filter.writer.print("{d}", .{player_id});
+    }
+    try filter.writer.writeAll(
+        "]},\"limit\":2000,\"sortDraftRanks\":{\"sortPriority\":1,\"sortAsc\":true,\"value\":\"PPR\"}}}",
+    );
+
+    const body = try fetchEspn(http, allocator, config, url, filter.written());
     defer allocator.free(body);
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, body, .{});
     defer parsed.deinit();
 
-    const athlete = parsed.value.object.get("athlete").?.object;
     const state = shared.lock();
     defer shared.unlock();
-    try state.addPlayer(
-        player_id,
-        athlete.get("fullName").?.string,
-        athlete.get("position").?.object.get("abbreviation").?.string,
-        0,
-        0,
-    );
+    try addFantasyPlayers(state, parsed.value.object.get("players").?.array.items);
+}
+
+fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value) !void {
+    for (players) |player_value| {
+        const item = player_value.object;
+        const player = item.get("player").?.object;
+        const position_id: i32 = @intCast(player.get("defaultPositionId").?.integer);
+        try state.addPlayer(
+            @intCast(item.get("id").?.integer),
+            player.get("fullName").?.string,
+            positionName(position_id),
+            @intCast(player.get("proTeamId").?.integer),
+            @intCast(item.get("draftAuctionValue").?.integer),
+        );
+    }
 }
 
 fn ensureNominatedPlayer(

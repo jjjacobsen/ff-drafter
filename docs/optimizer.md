@@ -2,70 +2,93 @@
 
 ## Scope
 
-The optimizer calculates values and recommendations without performing network actions. The ESPN worker uses those recommendations to place bids and evaluate nominations
+The optimizer calculates roster plans and bid recommendations without performing network actions. The ESPN worker uses the stored recommendation to place bids and evaluate nominations
 
-It recalculates after synchronized draft updates and stores one recommendation for the current auction player in draft state. BID and CLOCK updates for the same player reuse the cached recommendation and only update the action
+It recalculates after synchronized draft changes. BID and CLOCK updates for the same player reuse the cached recommendation and only update the action
 
-## Inputs
+## Values and expected costs
 
-The optimizer uses:
+ESPN `draftAuctionValue` is player utility. D/ST utility is always `$1`
 
-- ESPN `draftAuctionValue` directly as player utility
-- The user's remaining budget and owned players
-- Every configured ESPN roster slot
-- All undrafted players in the ESPN catalog
-- The current auction player, bid, and leading team
+Future purchase cost starts from ESPN value and follows the league's observed auction market. The optimizer calculates a discretionary-dollar inflation ratio from every completed purchase:
 
-It does not use ESPN value as a projected purchase cost. It does not use sale prices to change player values. Other teams' rosters only determine which players are no longer available
+- Expected discretionary dollars are `max(ESPN value - $1, 0)`
+- Actual discretionary dollars are `max(purchase cost - $1, 0)`
+- A `$100` expected and `$100` actual prior stabilizes the ratio early in the draft
+- A player's expected cost is `$1` plus rounded ESPN discretionary value multiplied by that ratio
 
-D/ST utility and its maximum bid are always `$1`
+Adjusted and undone purchases automatically change the ratio because the calculation reads the current rosters. D/ST expected cost remains `$1`
 
-## Roster assignment
+The user's realized difference is owned ESPN value minus actual purchase cost. A complete plan's final planned difference adds future ESPN value and subtracts future expected cost
 
-The optimizer solves two complete roster assignments. The first excludes the nominee. The second includes the nominee as a mandatory player
+## Bounded roster planning
 
-Each roster slot is one assignment row and each candidate player is one assignment column. A rectangular Hungarian matcher enforces one player per slot and at most one slot per player. Incompatible slot and position edges cannot be selected
+The optimizer creates one baseline plan that excludes the nominee and one forced plan that includes the nominee. Owned players are mandatory in both plans. The nominee is mandatory in the forced plan. Every player is assigned to one compatible ESPN roster slot, and every slot must be filled
 
-Owned players are mandatory in both assignments and can move to any compatible slot. The nominee is also mandatory in the second assignment. A bonus larger than every possible utility difference forces mandatory players into the maximum assignment, and the optimizer verifies that every mandatory player was selected
+Planning uses an iterative fixed-width beam. It does not use recursion or an unbounded Pareto frontier. At each assignment step it retains at most 32 partial plans:
 
-Starter slots have utility weight `4`. ESPN bench, reserve, and extended-designated-reserve slots `20`, `22`, and `24` have utility weight `1`. The matcher maximizes the exact weighted ESPN utility of the complete roster
+- 20 plans selected for roster quality
+- Up to 8 additional plans selected for planned difference
+- Remaining capacity selected for minimum expected spend
 
-Before matching, undrafted candidates are sorted deterministically and reduced to the top roster-size values at each exact position. A lower player at the same position has identical slot compatibility and cannot improve a maximum-utility assignment. Owned players and the forced nominee are never removed by this reduction
+The planner supports up to 32 configured roster slots. To bound branching, each exact position keeps its 16 highest-value undrafted players plus enough lowest-cost players to fill the roster. Owned players and the forced nominee are never removed
 
-For `S` roster slots and `C` retained candidates, each rectangular Hungarian solve takes `O(S²C)` time and `O(S + C)` working memory. Catalog collection and deterministic reduction take `O(P log P)` time for `P` undrafted players. There is no recursion or enumeration by budget, player combination, or plan frontier
+An exact polynomial assignment also finds the minimum-expected-cost complete assignment in this reduced candidate set. Owned players and the forced nominee remain mandatory. If its minimum cost exceeds the remaining budget, no affordable plan exists in the reduced set. If the quality beam loses every complete assignment, the planner returns this minimum-cost assignment
 
-## Recommendation values
+Every complete plan must fit the user's remaining budget. If any retained baseline plan can finish at a planned difference of at least `+$12`, lower-difference baseline plans are not eligible and the forced plan must preserve that floor. If the baseline cannot reach the floor, the planner selects roster quality without trying to maximize an unreachable difference
+
+Eligible plans use this exact lexicographic order:
+
+1. Higher starter ESPN value
+2. Higher bench ESPN value
+3. Higher planned difference
+4. Lower expected spend
+5. Lower player IDs in roster-slot order
+
+The fixed beam and bounded candidate reduction are deliberate responsiveness limits. They approximate the global quality optimum when a discarded partial plan would later become best. The minimum-cost fallback is exact only for the reduced candidate set. Every returned plan is complete and budget-feasible
+
+## Nominee eligibility and displayed values
+
+The forced plan reserves the nominee's inflation-adjusted expected cost, limited by the legal maximum. This prevents the rest of the planned roster from consuming money that should remain available for the nominee. If no affordable completion exists at that reservation, the planner retries with a `$1` reservation
+
+A nominee is eligible only when the forced plan:
+
+- Improves starter ESPN value, or
+- Ties starter ESPN value without reducing bench ESPN value
+
+The baseline and forced plans are solved independently. If no affordable baseline completion exists but the nominee enables one, the nominee is eligible under the same legal and budget limits. Its marginal value is its own ESPN value, and it gets no credit for avoided baseline cost
 
 The main screen shows:
 
-- `target`: `min(max(ESPN value, $1), max bid)`
-- `max`: The nominee's proportional spending allocation, limited by the legal maximum
-- `legal`: Remaining budget minus `$1` for every other empty roster slot
-- `replacement`: The nominee's ESPN value minus his utility-equivalent marginal improvement
-- `marginal`: The weighted score difference between the forced and unforced assignments, divided by `4` when the nominee is a starter or `1` when he is on the bench
+- `max`: The only actionable optimizer limit
+- `legal`: Remaining budget minus `$1` for every other empty slot. This is diagnostic because `max` already includes it
+- `expected`: The nominee's inflation-adjusted expected market cost
+- `marginal`: Starter ESPN value gained when starter value improves, otherwise bench ESPN value gained when starter value ties
+- `Starter` or `Bench`: The nominee's projected forced-plan role
 
-If the forced assignment has less weighted utility than the assignment without the nominee, maximum bid is `$0`
+The recommendation action is:
 
-The action is:
-
-- `BID` when the next bid does not exceed the maximum
+- `BID` when the next bid does not exceed `max`
 - `HOLD` when the user's team already leads
-- `PASS` when the next bid exceeds the maximum or no complete compatible assignment exists
+- `PASS` otherwise
 
 An auction with no leader and a zero current bid has a `$1` next bid. Otherwise, the next bid is the current bid plus `$1`
 
-## Spending pace
+## Maximum bid
 
-The forced assignment identifies the future players who fill the user's empty slots. The optimizer reserves `$1` for each empty slot, then distributes all discretionary dollars across those selected future players in proportion to their slot-weighted ESPN value above the `$1` baseline
+For an eligible nominee, the optimizer derives four limits from the selected plans:
 
-Integer remainders use deterministic player ID and slot order. If all eligible selected future weights are zero, discretionary dollars are divided equally. D/ST receives no discretionary dollars and remains capped at `$1`
+- Legal capacity: ESPN's legal maximum after reserving `$1` for every other empty slot
+- Budget capacity: Remaining budget after expected cost for every forced-plan player except the nominee
+- Protected-difference capacity: The greatest nominee cost that preserves `+$12` when the selected baseline plan already reaches that floor
+- Roster-value capacity: Expected cost avoided by removing the baseline plan's displaced future spending, plus the nominee's marginal roster value
 
-The nominee's allocation is its maximum bid, clamped to the legal maximum. Spending pace therefore moves the remaining budget toward the best players in the current exact roster assignment without treating ESPN utility as a predicted purchase cost
+`max` is the greatest nonnegative whole-dollar amount within all applicable limits. When the selected baseline reaches `+$12`, the forced plan must preserve it and `max` is capped by protected-difference capacity. When the baseline cannot reach the floor, the floor cap does not apply. A temporary nominee discount does not activate the floor by itself. D/ST remains capped at `$1`
+
+This values a nominee by the expected player cost it replaces and the roster improvement it adds. A major starter upgrade can therefore support a bid near ESPN value, while unused discretionary budget is not distributed proportionally across the roster
 
 ## Nomination evaluation
 
-When it is the user's nomination turn, the application evaluates the highest 64 ESPN-valued undrafted players and keeps only players that the user can legally acquire for `$1`. If that group has no legal nominee, it continues through lower-valued players until it finds one. It prefers the player with the largest difference between ESPN value and marginal roster value. This selects a valuable player that contributes as little as possible to the user's optimized roster
+When it is the user's nomination turn, the application evaluates at most 8 full recommendations in descending ESPN-value order. It keeps players with a legal `$1` optimizer maximum and prefers the largest `ESPN value - max` difference. This selects a high-value player that the optimizer least wants to buy
 
-## Safety rules
-
-The optimizer never recommends more than ESPN's legal maximum. It reserves at least `$1` for every other empty roster slot and returns a zero maximum for an incompatible or incomplete roster assignment
+Evaluation stops early when the next unseen ESPN value minus `$1` cannot beat the selected decoy score

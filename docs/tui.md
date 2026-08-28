@@ -35,7 +35,7 @@ The center panel shows one of these states:
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` together with its target bid, maximum bid, ESPN legal maximum, replacement value, marginal value, and projected starter or bench role. A player without a complete budget-feasible roster fit gets a zero maximum and a clear explanation
+The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` together with the optimizer maximum, ESPN legal maximum, expected market cost, marginal roster value, and projected starter or bench role. The optimizer maximum is the only actionable bid limit. The legal maximum is diagnostic. A player without a complete budget-feasible roster fit gets a zero maximum and a clear explanation
 
 The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads. Pressing `q` or `esc` opens an exit confirmation dialog. Press `y` or `enter` to exit, or press `n` or `esc` to cancel. A second `q` does not exit
 
@@ -84,9 +84,9 @@ The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker send
 
 An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open, stops automation, and shows the complete error instead of reconnecting and repeating the rejected command
 
-The WebSocket worker schedules and sends all actions. At or below the optimizer target, a bid waits 2 to 5 seconds. Above the target but within the optimizer maximum, it waits 1 to 3 seconds. The schedule is capped by a randomized 2 to 3 second deadline threshold. A newer bid cancels the old schedule and creates a new one from the updated state
+The WebSocket worker schedules and sends all actions. An approved bid waits one randomized 2 to 5 second delay. The schedule is capped by a randomized 2 to 3 second deadline threshold. A newer bid cancels the old schedule and creates a new one from the updated state
 
-Nominations wait 5 to 10 seconds and open at `$1`. The nomination evaluator starts with the 64 highest-valued available ESPN players and prefers the player with the most ESPN value that does not improve the user's optimized roster. It searches lower-valued players only when the first group has no legal `$1` nominee. Every action revalidates the turn, player, price, optimizer maximum, legal maximum, budget, and availability immediately before it is sent
+Nominations wait 5 to 10 seconds and open at `$1`. The nomination evaluator calculates at most 8 full recommendations in descending ESPN-value order and prefers the largest difference between ESPN value and optimizer maximum. It stops early when the next unseen ESPN value minus `$1` cannot beat the selected score. Every action revalidates the turn, player, price, authoritative optimizer maximum, budget, and availability immediately before it is sent
 
 The WebSocket runs in one worker. The UI reads shared state under a mutex and receives Vaxis events when the state changes
 

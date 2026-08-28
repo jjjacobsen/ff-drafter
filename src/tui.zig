@@ -458,8 +458,8 @@ fn drawAuction(
             };
             const recommendation_text = std.fmt.allocPrint(
                 frame_allocator,
-                "{s}  •  target ${d}  •  max ${d}  •  legal ${d}",
-                .{ action, recommendation.target_bid, recommendation.max_bid, recommendation.legal_max },
+                "{s}  •  max ${d}  •  legal ${d}",
+                .{ action, recommendation.max_bid, recommendation.legal_max },
             ) catch unreachable;
             printCentered(
                 content,
@@ -480,10 +480,10 @@ fn drawAuction(
             else
                 std.fmt.allocPrint(
                     frame_allocator,
-                    "{s}  •  replacement ${d}  •  marginal +${d}",
+                    "{s}  •  expected ${d}  •  marginal +${d}",
                     .{
                         if (recommendation.projected_starter) "Starter" else "Bench",
-                        recommendation.replacement_value,
+                        recommendation.expected_cost,
                         recommendation.marginal_value,
                     },
                 ) catch unreachable;

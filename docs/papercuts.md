@@ -75,3 +75,7 @@ The message handler treated every ESPN `ERROR` as a broken socket. A rejected co
 ## 2026-08-27: ESPN rejected commands without a trailing newline
 
 The browser bundle's WebSocket transport appends `\n` to every command before sending it. The controller included the newline on `PING` but omitted it from `AUTODRAFT`, `BID`, and `NOMINATE`, which caused `ERROR 1 Invalid arguments for command`. Adding the newline inside each WebSocket text frame made the commands match ESPN's browser protocol
+
+## 2026-08-27: `INIT` includes transport padding after the Base64 payload
+
+A read-only snapshot probe saved the complete text after the `INIT` command and the Base64 decoder returned `InvalidPadding`. ESPN had appended a space and `#` transport padding after the Base64 value. Decoding only the first whitespace-delimited field matched the production message parser and unblocked snapshot inspection

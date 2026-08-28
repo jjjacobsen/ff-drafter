@@ -108,13 +108,7 @@ The player records use this shape:
 
 Map names with `players[].player.fullName`, not `players[].fullName`
 
-The available-player response can omit drafted players and the player who is already up for bid. Resolve a missing NFL player ID with:
-
-```text
-GET https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/{playerId}
-```
-
-Read the name from `athlete.fullName`
+The available-player response can omit drafted players and the player who is already up for bid. Resolve all missing completed-pick and current-block IDs in one authenticated league request to `draftInit` with `kona_player_info`. Send an `X-Fantasy-Filter` with a `players.filterIds.value` array, then read `fullName`, `defaultPositionId`, `proTeamId`, and `draftAuctionValue` from the returned fantasy player records
 
 ### Draft security token
 
@@ -393,7 +387,7 @@ Do not treat the raw WebSocket implementation as the final architecture. The pro
 7. Connect as the only client for the member and team
 8. Decode `INIT`, disable ESPN autodraft when the user's `autodraftTypeId` is nonzero, and populate picks, team rosters, and remaining budgets
 9. Apply `SOLD`, `ADJUSTED`, `UNDONE`, and `SLOT_CHANGED` updates
-10. Resolve missing player IDs from ESPN's athlete endpoint
+10. Batch-resolve missing player IDs from the authenticated fantasy player endpoint
 11. Validate turn, player, bid, roster, and budget state before every outgoing action
 12. Send `NOMINATE` and `BID` commands when the draft strategy requests them
 13. Reconnect with backoff when ESPN closes an unexpected connection
