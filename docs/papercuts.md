@@ -66,11 +66,11 @@ The first automation loop evaluated stored state before reading the next WebSock
 
 ## 2026-08-27: ESPN autodraft competed with optimizer bidding
 
-The autonomous controller joined the room but left ESPN autodraft unchanged. ESPN could therefore bid for the user's team above the optimizer maximum while the application correctly displayed a lower limit. Reading `autodraftTypeId` from `INIT` and sending `AUTODRAFT false` when it is nonzero leaves only the optimizer in control
+The autonomous controller joined the room but left ESPN autodraft unchanged. ESPN could therefore bid for the user's team above the optimizer maximum while the application correctly displayed a lower limit. Reading `autodraftTypeId` from `INIT` and sending `AUTODRAFT false` when it is nonzero leaves only the optimizer in control. Live updates use `AUTODRAFT {teamId} {boolean}`, so the controller also disables later `true` updates for the user's team
 
 ## 2026-08-27: A rejected draft command caused a reconnect storm
 
-The message handler treated every ESPN `ERROR` as a broken socket. A rejected command therefore closed a healthy connection, rejoined, repeated the command, and failed again. Treating `ERROR` as a command-level failure keeps the socket open, stops automation, and shows ESPN's complete response without reconnecting
+The message handler treated every ESPN `ERROR` as a broken socket. A rejected command therefore closed a healthy connection, rejoined, repeated the command, and failed again. Treating `ERROR` as a command-level failure keeps the socket open and shows ESPN's complete response without reconnecting. The action scheduler already marks an outgoing action as sent, so automation can remain active without repeating the rejected command
 
 ## 2026-08-27: ESPN rejected commands without a trailing newline
 

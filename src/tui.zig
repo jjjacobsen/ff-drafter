@@ -836,6 +836,6 @@ fn statusStyle(status: draft.Status) Cell.Style {
     return switch (status) {
         .live => accent,
         .loading, .connecting => muted,
-        .reconnecting => error_style,
+        .command_error, .reconnecting => error_style,
     };
 }

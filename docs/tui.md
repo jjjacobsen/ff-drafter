@@ -82,9 +82,9 @@ After initialization, these messages update the state:
 
 The engine reads this synchronized state before every action. This lets it start during an active draft without separate history
 
-The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker sends `AUTODRAFT false` only when that value reports enabled autodraft, which prevents repeated no-op commands
+The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker sends `AUTODRAFT false` only when that value reports enabled autodraft. It also handles live `AUTODRAFT {teamId} true` updates and immediately disables ESPN autodraft again
 
-An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open, stops automation, and shows the complete error instead of reconnecting
+An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection and autonomous engine active, marks the rejected action as already sent, and shows the complete error instead of reconnecting or repeating the same action
 
 The WebSocket worker waits until the final eight seconds to bid. It waits one second after a counter bid. Nominations wait five seconds, or one second after the starting roster is full. Every action is checked against the current player, turn, roster, budget, and clock before the worker sends it
 

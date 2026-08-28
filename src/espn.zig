@@ -420,6 +420,16 @@ fn handleMessage(
         return;
     }
 
+    if (std.mem.eql(u8, command, "AUTODRAFT")) {
+        const team_id = try nextInt(i32, &fields);
+        const enabled = std.mem.eql(u8, fields.next().?, "true");
+        if (team_id == config.team_id and enabled) {
+            var disable_autodraft = "AUTODRAFT false\n".*;
+            try client.writeText(&disable_autodraft);
+        }
+        return;
+    }
+
     if (std.mem.eql(u8, command, "ADJUSTED")) {
         const pick_number = try nextInt(i32, &fields);
         _ = try nextInt(i32, &fields);
@@ -464,7 +474,7 @@ fn handleMessage(
         {
             const state = shared.lock();
             defer shared.unlock();
-            try state.setStatus(.connecting, status);
+            try state.setStatus(.command_error, status);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -482,7 +492,7 @@ fn runAutomation(
     state_scope: {
         const state = shared.lock();
         defer shared.unlock();
-        if (state.status != .live) return;
+        if (state.status != .live and state.status != .command_error) return;
 
         if (state.auction.nomination_team_id == state.user_team_id) {
             const remaining_ms = state.clockRemainingMs(now_ms);

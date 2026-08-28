@@ -346,7 +346,7 @@ The production controller confirms all relevant state immediately before it send
 
 ESPN should reject invalid commands, but the application must not depend on server rejection as its primary safety check
 
-The proof-of-concept listener was monitor-only. The Zig controller reads the user's `autodraftTypeId` from `INIT` and sends `AUTODRAFT false` only when needed. The autonomous engine invokes `NOMINATE` and `BID` from the synchronized draft state
+The proof-of-concept listener was monitor-only. The Zig controller reads the user's `autodraftTypeId` from `INIT` and sends `AUTODRAFT false` only when needed. It also disables any later `AUTODRAFT {teamId} true` update for the user's team. The autonomous engine invokes `NOMINATE` and `BID` from the synchronized draft state
 
 ## Keepalive behavior
 

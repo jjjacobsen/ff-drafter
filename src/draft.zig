@@ -5,6 +5,7 @@ pub const Status = enum {
     loading,
     connecting,
     live,
+    command_error,
     reconnecting,
 };
 
