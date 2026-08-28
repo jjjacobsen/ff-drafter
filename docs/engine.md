@@ -38,6 +38,8 @@ A player has no extra roster penalty while the user has an open starter slot for
 
 When only an open flex slot can start the player, the engine subtracts another `$2`. For example, a running back has this penalty after both RB slots are full while the flex slot remains open
 
+Until the user's team owns its first RB, every WR receives another `$5` penalty. This strongly prefers an RB for the first major purchase while preserving the option to take an exceptional WR discount. The penalty disappears immediately after any RB purchase
+
 While any priority starter slot is open, D/ST, K, and every player who can only use the bench have a hard `$1` maximum
 
 The one configured starting QB slot is part of the priority lineup. After it is filled, another QB is treated exactly like any other possible bench player

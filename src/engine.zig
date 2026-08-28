@@ -4,6 +4,7 @@ const draft = @import("draft.zig");
 const budget_gap_threshold = 20;
 const budget_adjustment_step = 10;
 const flex_penalty = 2;
+const pre_running_back_wr_penalty = 5;
 const impossible_cost: i64 = 1_000_000_000_000;
 
 pub const Decision = struct {
@@ -378,7 +379,24 @@ fn legalMax(state: *const draft.State, team: *const draft.Team) i32 {
 }
 
 fn rosterPenalty(state: *const draft.State, team: *const draft.Team, position: []const u8) i32 {
-    return if (hasOpenDirectStarterSlot(state, team, position)) 0 else flex_penalty;
+    const slot_penalty: i32 = if (hasOpenDirectStarterSlot(state, team, position)) 0 else flex_penalty;
+    const first_running_back_penalty: i32 = if (std.mem.eql(u8, position, "WR") and
+        !teamHasPosition(state, team, "RB"))
+        pre_running_back_wr_penalty
+    else
+        0;
+    return slot_penalty + first_running_back_penalty;
+}
+
+fn teamHasPosition(
+    state: *const draft.State,
+    team: *const draft.Team,
+    position: []const u8,
+) bool {
+    for (team.roster.items) |purchase| {
+        if (std.mem.eql(u8, state.players.get(purchase.player_id).?.position, position)) return true;
+    }
+    return false;
 }
 
 fn hasOpenDirectStarterSlot(
