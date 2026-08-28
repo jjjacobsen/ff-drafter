@@ -8,13 +8,29 @@ The application disables ESPN autodraft when ESPN reports that it is active. Thi
 
 ## Maximum bid
 
-Every available player starts with this maximum:
+Every available player starts below the ESPN value. The baseline discount changes in whole-dollar steps based on the draft phase and the player's ESPN value
 
-```text
-ESPN value - $4
-```
+The draft-phase discount uses the average remaining budget of all other teams:
 
-The engine then applies roster and budget adjustments
+| Other-team average | Discount |
+| --- | ---: |
+| `$101+` | `-4` |
+| `$76–100` | `-3` |
+| `$51–75` | `-2` |
+| `$26–50` | `-1` |
+| `$0–25` | `+0` |
+
+The player-value discount prevents a fixed `$4` from consuming most of a low-value player's price:
+
+| ESPN value | Discount limit |
+| --- | ---: |
+| `$36+` | `-4` |
+| `$21–35` | `-3` |
+| `$11–20` | `-2` |
+| `$6–10` | `-1` |
+| `$1–5` | `+0` |
+
+The engine uses the smaller discount from these two tables
 
 ### Roster adjustment
 
@@ -30,13 +46,11 @@ The engine returns a zero maximum when no compatible roster slot remains
 
 The engine compares the user's remaining budget with the average remaining budget of all other teams
 
-The maximum stays at its baseline until the user has more than `$20` above that average. After that, each complete `$10` of additional gap adds `$1` to the maximum
+The maximum stays at its baseline through the first `$20` above that average. After that, each complete `$10` of additional gap adds `$1` to the maximum
 
-The adjustment cannot take the maximum above the ESPN value while the budget gap is `$90` or less. This gives the engine a `$30` plateau at the ESPN value after the adjustment removes the baseline `$4` discount
+This adjustment is capped at the ESPN value until the user's budget is more than twice the other-team average. After that point, each complete `$10` above twice the average permits another `$1` above the ESPN value
 
-When the gap is more than `$90`, each started `$10` above that threshold adds another `$1`. This is the only budget range that permits a maximum above the ESPN value
-
-This slower adjustment prevents early purchases by other teams from increasing the maximum too quickly. It still prevents the engine from keeping too much money when the budget difference becomes dramatic
+Roster penalties apply after the phase, player-value, and budget adjustments. This preserves the lower value of a player who can only use a flex or bench slot
 
 ### Legal limit
 

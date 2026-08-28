@@ -1,11 +1,8 @@
 const std = @import("std");
 const draft = @import("draft.zig");
 
-const baseline_discount = 4;
 const budget_gap_threshold = 20;
 const budget_adjustment_step = 10;
-const espn_value_adjustment = 4;
-const above_espn_gap_threshold = 90;
 const flex_penalty = 2;
 const bench_penalty = 4;
 const scarce_bench_penalty = 8;
@@ -51,7 +48,7 @@ pub fn maxBid(state: *const draft.State, player_id: i32) i32 {
     else
         bench_penalty;
 
-    const raw_max = player.estimated_price - baseline_discount - roster_penalty + budgetAdjustment(state, team);
+    const raw_max = adjustedEspnValue(state, team, player.estimated_price) - roster_penalty;
     return @min(@max(raw_max, 1), legal_max);
 }
 
@@ -87,8 +84,9 @@ pub fn startingRosterComplete(state: *const draft.State) bool {
     return true;
 }
 
-fn budgetAdjustment(state: *const draft.State, user_team: *const draft.Team) i32 {
-    if (state.teams.items.len <= 1) return 0;
+fn adjustedEspnValue(state: *const draft.State, user_team: *const draft.Team, espn_value: i32) i32 {
+    if (state.teams.items.len <= 1)
+        return espn_value - @as(i32, @intCast(playerValueDiscount(espn_value)));
 
     var other_budgets: i64 = 0;
     for (state.teams.items) |team| {
@@ -96,16 +94,36 @@ fn budgetAdjustment(state: *const draft.State, user_team: *const draft.Team) i32
     }
     const average = @divFloor(other_budgets, @as(i64, @intCast(state.teams.items.len - 1)));
     const gap = @as(i64, user_team.remaining_budget) - average;
-    if (gap <= budget_gap_threshold) return 0;
-
-    const catch_up = @min(
-        @divFloor(gap - budget_gap_threshold, budget_adjustment_step),
-        espn_value_adjustment,
+    const baseline_discount = @min(phaseDiscount(average), playerValueDiscount(espn_value));
+    const catch_up = if (gap > budget_gap_threshold)
+        @divFloor(gap - budget_gap_threshold, budget_adjustment_step)
+    else
+        0;
+    const capped_value = @min(
+        @as(i64, espn_value) - baseline_discount + catch_up,
+        espn_value,
     );
-    if (gap <= above_espn_gap_threshold) return @intCast(catch_up);
+    const above_espn = @divFloor(
+        @max(@as(i64, user_team.remaining_budget) - 2 * average, 0),
+        budget_adjustment_step,
+    );
+    return @intCast(capped_value + above_espn);
+}
 
-    return espn_value_adjustment +
-        @as(i32, @intCast(@divFloor(gap - above_espn_gap_threshold + budget_adjustment_step - 1, budget_adjustment_step)));
+fn phaseDiscount(average_budget: i64) i64 {
+    if (average_budget >= 101) return 4;
+    if (average_budget >= 76) return 3;
+    if (average_budget >= 51) return 2;
+    if (average_budget >= 26) return 1;
+    return 0;
+}
+
+fn playerValueDiscount(espn_value: i32) i64 {
+    if (espn_value >= 36) return 4;
+    if (espn_value >= 21) return 3;
+    if (espn_value >= 11) return 2;
+    if (espn_value >= 6) return 1;
+    return 0;
 }
 
 fn hasOpenDirectStarterSlot(
