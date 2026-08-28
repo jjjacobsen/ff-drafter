@@ -35,7 +35,9 @@ The center panel shows one of these states:
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-One decision line appears below the player, current bid, leading team, and clock. It shows `max $XX -Y`, where `XX` is the current engine maximum and `Y` is its difference from the ESPN value. A maximum above the ESPN value uses `+Y`. The line is green when the next bid is within the maximum and gray when the next bid is too expensive
+Two decision lines appear below the player, current bid, leading team, and clock. The first shows `max $XX -Y`, where `XX` is the current engine maximum and `Y` is its difference from the ESPN value. A maximum above the ESPN value uses `+Y`. The line is green when the next bid is within the maximum and gray when the next bid is too expensive
+
+The second line shows `$USER • DIFF • $AVERAGE`. `USER` is the user's remaining budget, `AVERAGE` is the average remaining budget of all other teams, and `DIFF` is the signed difference between them. A positive or zero difference is green. A negative difference is red
 
 The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads. Pressing `q` or `esc` opens an exit confirmation dialog. Press `y` or `enter` to exit, or press `n` or `esc` to cancel. A second `q` does not exit
 

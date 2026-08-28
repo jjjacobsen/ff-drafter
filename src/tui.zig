@@ -503,6 +503,8 @@ fn drawAuction(
             printCentered(content, 7, bidder, heading);
         }
 
+        drawBudgetComparison(state, content, frame_allocator);
+
         const remaining = state.clockRemainingMs(now_ms);
         const clock_text = formatClock(frame_allocator, remaining);
         printCentered(content, 9, clock_text, clock);
@@ -519,6 +521,56 @@ fn drawAuction(
 
     printCentered(content, 3, "Waiting for the next nomination", heading);
     printCentered(content, 6, state.status_message, statusStyle(state.status));
+}
+
+fn drawBudgetComparison(
+    state: *const draft.State,
+    window: vaxis.Window,
+    frame_allocator: std.mem.Allocator,
+) void {
+    const user_index = state.teamIndexById(state.user_team_id) orelse return;
+    const user_budget = state.teams.items[user_index].remaining_budget;
+    if (state.teams.items.len <= 1) return;
+
+    var other_budgets: i64 = 0;
+    for (state.teams.items) |team| {
+        if (team.id != state.user_team_id) other_budgets += team.remaining_budget;
+    }
+    const average: i32 = @intCast(@divFloor(
+        other_budgets,
+        @as(i64, @intCast(state.teams.items.len - 1)),
+    ));
+    const difference = user_budget - average;
+
+    const left = std.fmt.allocPrint(frame_allocator, "${d} • ", .{user_budget}) catch unreachable;
+    const middle = if (difference >= 0)
+        std.fmt.allocPrint(frame_allocator, "+{d}", .{difference}) catch unreachable
+    else
+        std.fmt.allocPrint(frame_allocator, "-{d}", .{-difference}) catch unreachable;
+    const right = std.fmt.allocPrint(frame_allocator, " • ${d}", .{average}) catch unreachable;
+    const left_width = window.gwidth(left);
+    const middle_width = window.gwidth(middle);
+    const total_width = left_width + middle_width + window.gwidth(right);
+    const column = if (total_width < window.width) (window.width - total_width) / 2 else 0;
+
+    _ = window.printSegment(.{ .text = left, .style = details_style }, .{
+        .row_offset = 13,
+        .col_offset = column,
+        .wrap = .none,
+    });
+    _ = window.printSegment(.{
+        .text = middle,
+        .style = if (difference >= 0) money else error_style,
+    }, .{
+        .row_offset = 13,
+        .col_offset = column + left_width,
+        .wrap = .none,
+    });
+    _ = window.printSegment(.{ .text = right, .style = details_style }, .{
+        .row_offset = 13,
+        .col_offset = column + left_width + middle_width,
+        .wrap = .none,
+    });
 }
 
 fn drawTeam(
