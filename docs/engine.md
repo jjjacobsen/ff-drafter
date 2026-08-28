@@ -82,19 +82,25 @@ The target per slot acts as a floor on the normal maximum. The number of open pr
 
 The engine takes the higher of the normal maximum and the limited spending target. It then applies the flex penalty and legal maximum
 
-This pressure has no effect early when good players already have normal maximums above the target. It becomes stronger as priority slots close and the remaining budget must fit into fewer important starters
+The priority lineup has an ESPN-value quality goal of `$20` for RB, WR, TE, and FLEX players. When a planned skill player is worth `$18` through `$20`, the forcing cap is at least ESPN value `+$3`. This pressure starts when the available player tier approaches the quality floor, before the engine must settle for a much lower-value final starter. QB does not use this quality-floor rule
+
+When spending pressure changes a planned maximum, nominations select the highest ESPN-value player whose maximum was actually raised. This directs nomination turns to the players that the forcing rule is trying to secure
+
+The remaining pressure has no effect early when good players already have normal maximums above the target. It becomes stronger as priority slots close and the remaining budget must fit into fewer important starters
 
 ### Late roster spending plan
 
 After every priority starter slot is full, the engine releases the effective `$1` cap for the remaining roster plan
 
-It divides the complete remaining budget across all empty D/ST, K, and bench slots. A maximum-value assignment selects the best available legal player for every remaining slot. Only those planned players receive the late spending target, so less valuable alternatives retain the `$1` maximum
+It divides the complete remaining budget across all empty D/ST, K, and bench slots. A maximum-value assignment selects the best available legal player for every remaining slot. Less valuable alternatives retain the `$1` maximum
+
+A planned player's late maximum is the higher of the per-slot spending target and the normal dynamic ESPN-value maximum, limited by the legal maximum. This permits one or two strong bench purchases instead of forcing the remaining money into equal low-value purchases
 
 ```text
 late target per slot = remaining budget / all empty roster slots
 ```
 
-The late target has no ESPN-value cap. It starts near `$1` or `$2` and rises when players are purchased cheaply or fewer slots remain. The final roster nomination uses the complete final target, limited by ESPN's legal maximum, so unused auction money has a place to go
+The per-slot target starts near `$1` or `$2` and rises when players are purchased cheaply or fewer slots remain. The dynamic value side lets a `$17` player retain a much higher maximum than that target when the budget can legally support it. The final roster nomination uses the complete final target, limited by ESPN's legal maximum, so unused auction money has a place to go
 
 A QB can be selected for a bench slot during this phase, but it has no separate backup-QB rule
 

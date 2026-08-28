@@ -5,6 +5,9 @@ const budget_gap_threshold = 20;
 const budget_adjustment_step = 10;
 const flex_penalty = 2;
 const pre_running_back_wr_penalty = 5;
+const priority_quality_goal = 20;
+const priority_quality_fallback = 18;
+const priority_quality_overpay = 3;
 const impossible_cost: i64 = 1_000_000_000_000;
 
 pub const Decision = struct {
@@ -72,8 +75,12 @@ pub fn chooseNomination(state: *const draft.State) ?Nomination {
     const plan = buildCorePlan(state, team) catch unreachable;
     defer plan.deinit();
 
-    if (plan.player_ids.len > 0 and (plan.open_slots == 1 or spendingPressureActive(state, team, &plan))) {
-        const player_id = bestPlannedPlayer(state, &plan);
+    const pressure_player_id = bestPressurePlayer(state, team, &plan);
+    if (plan.player_ids.len > 0 and (plan.open_slots == 1 or pressure_player_id != null)) {
+        const player_id = if (plan.open_slots == 1)
+            bestPlannedPlayer(state, &plan)
+        else
+            pressure_player_id.?;
         const player = state.players.get(player_id).?;
         const maximum = forcedMaxBid(
             state,
@@ -147,25 +154,48 @@ fn forcedMaxBid(
 
     const cap = if (plan.late_stage)
         plan.target_per_slot
-    else switch (plan.open_slots) {
-        0 => 0,
-        1 => plan.target_per_slot,
-        2 => player.estimated_price + 5,
-        3 => player.estimated_price + 2,
-        else => player.estimated_price,
+    else cap: {
+        const slot_cap = switch (plan.open_slots) {
+            0 => 0,
+            1 => plan.target_per_slot,
+            2 => player.estimated_price + 5,
+            3 => player.estimated_price + 2,
+            else => player.estimated_price,
+        };
+        const quality_cap = if (isQualityPressurePlayer(player))
+            player.estimated_price + priority_quality_overpay
+        else
+            0;
+        break :cap @max(slot_cap, quality_cap);
     };
     const penalty = if (plan.late_stage) 0 else rosterPenalty(state, team, player.position);
-    const forced_value = @min(plan.target_per_slot, cap) - penalty;
+    const planned_value = if (plan.late_stage)
+        @max(plan.target_per_slot, adjustedEspnValue(state, team, player.estimated_price))
+    else
+        @min(plan.target_per_slot, cap);
+    const forced_value = planned_value - penalty;
     return @max(normal_max, @min(@max(forced_value, 1), legalMax(state, team)));
 }
 
-fn spendingPressureActive(state: *const draft.State, team: *const draft.Team, plan: *const CorePlan) bool {
+fn bestPressurePlayer(
+    state: *const draft.State,
+    team: *const draft.Team,
+    plan: *const CorePlan,
+) ?i32 {
+    var best_id: ?i32 = null;
     for (plan.player_ids) |player_id| {
         const player = state.players.get(player_id).?;
         const normal_max = normalMaxBid(state, team, &player);
-        if (forcedMaxBid(state, team, player_id, &player, normal_max, plan) > normal_max) return true;
+        if (forcedMaxBid(state, team, player_id, &player, normal_max, plan) <= normal_max) continue;
+        if (betterNominee(state, player_id, best_id)) best_id = player_id;
     }
-    return false;
+    return best_id;
+}
+
+fn isQualityPressurePlayer(player: *const draft.Player) bool {
+    return !std.mem.eql(u8, player.position, "QB") and
+        player.estimated_price >= priority_quality_fallback and
+        player.estimated_price <= priority_quality_goal;
 }
 
 fn buildCorePlan(state: *const draft.State, team: *const draft.Team) !CorePlan {
