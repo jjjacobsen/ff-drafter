@@ -1,40 +1,22 @@
 const std = @import("std");
 
 const bench_slot_ids = [_]i32{ 20, 22, 24 };
-const beam_width = 32;
-const quality_beam_width = 20;
-const difference_beam_width = 8;
-const max_plan_slots = 32;
-const quality_candidates_per_position = 16;
-const inflation_prior = 100;
-const protected_difference = 12;
-const unassigned_player = std.math.maxInt(i32);
+const impossible_cost: i64 = 1_000_000_000_000_000;
 
 const Candidate = struct {
     id: i32,
     position: []const u8,
-    value: i32,
-    expected_cost: i32,
-    owned: bool,
-    nominee: bool,
+    points: f64,
+    points_units: i64,
 };
 
-const Plan = struct {
-    player_by_slot: [max_plan_slots]i32 = [1]i32{unassigned_player} ** max_plan_slots,
-    starter_value: i32 = 0,
-    bench_value: i32 = 0,
-    future_value: i32 = 0,
-    expected_spend: i32 = 0,
-};
-
-const PlanResult = struct {
-    plan: Plan,
-    floor_feasible: bool,
-};
-
-const Inflation = struct {
-    numerator: i64 = inflation_prior,
-    denominator: i64 = inflation_prior,
+const Replacement = struct {
+    position: []const u8,
+    points_units: i64 = 0,
+    remaining_starters: usize = 0,
+    full_starters: usize = 0,
+    expected_players: usize = 0,
+    bench_remainder: usize = 0,
 };
 
 pub fn recommend(allocator: std.mem.Allocator, state: anytype, accepts: *const fn (i32, []const u8) bool) !@TypeOf(state.recommendation) {
@@ -42,177 +24,177 @@ pub fn recommend(allocator: std.mem.Allocator, state: anytype, accepts: *const f
     const player = state.players.get(player_id) orelse return .{};
     const team_index = state.teamIndexById(state.user_team_id) orelse return .{};
     const team = &state.teams.items[team_index];
-    const nominated_value = playerValue(player.position, player.estimated_price);
 
     var drafted = std.AutoHashMap(i32, void).init(allocator);
     defer drafted.deinit();
     for (state.teams.items) |draft_team| {
         for (draft_team.roster.items) |purchase| try drafted.put(purchase.player_id, {});
     }
-    if (drafted.contains(player_id)) return .{ .player_id = player_id, .estimated_value = nominated_value };
-
-    const inflation = marketInflation(state);
-    const nominated_expected_cost = expectedCost(player.position, nominated_value, inflation);
-    const roster_size = state.roster_slots.items.len;
-    if (roster_size > max_plan_slots or team.roster.items.len >= roster_size) {
-        return .{
-            .player_id = player_id,
-            .estimated_value = nominated_value,
-            .expected_cost = nominated_expected_cost,
-        };
-    }
-    const empty_slots = roster_size - team.roster.items.len;
-    const legal_max = @max(team.remaining_budget - @as(i32, @intCast(empty_slots - 1)), 0);
-    if (legal_max == 0) return .{
+    if (drafted.contains(player_id)) return .{
         .player_id = player_id,
-        .estimated_value = nominated_value,
-        .expected_cost = nominated_expected_cost,
-        .legal_max = legal_max,
+        .projected_points = player.projected_points,
     };
 
-    var realized_difference: i32 = 0;
+    var remaining: std.ArrayList(Candidate) = .empty;
+    defer remaining.deinit(allocator);
+    var players = state.players.iterator();
+    while (players.next()) |entry| {
+        if (drafted.contains(entry.key_ptr.*)) continue;
+        try remaining.append(allocator, candidate(entry.key_ptr.*, entry.value_ptr));
+    }
+    std.mem.sort(Candidate, remaining.items, {}, candidateOrder);
+
+    var league_slots: std.ArrayList(i32) = .empty;
+    defer league_slots.deinit(allocator);
+    for (state.teams.items) |draft_team| {
+        try appendOpenSlots(allocator, &league_slots, state.roster_slots.items, draft_team.roster.items, true);
+    }
+
+    const league_assignment = try maximumAssignment(allocator, league_slots.items, remaining.items, null, accepts);
+    defer allocator.free(league_assignment);
+
+    var replacements: std.ArrayList(Replacement) = .empty;
+    defer replacements.deinit(allocator);
+    for (league_assignment) |candidate_index| {
+        if (candidate_index >= remaining.items.len) continue;
+        const selected = remaining.items[candidate_index];
+        const index = try replacementIndexOrAppend(allocator, &replacements, selected.position);
+        replacements.items[index].remaining_starters += 1;
+        replacements.items[index].full_starters += 1;
+    }
+    for (state.teams.items) |draft_team| {
+        for (draft_team.roster.items) |purchase| {
+            if (isBench(purchase.slot_id)) continue;
+            const owned_player = state.players.get(purchase.player_id).?;
+            const index = try replacementIndexOrAppend(allocator, &replacements, owned_player.position);
+            replacements.items[index].full_starters += 1;
+        }
+    }
+
+    var open_bench_slots: usize = 0;
+    for (state.teams.items) |draft_team| {
+        open_bench_slots += countOpenBenchSlots(state.roster_slots.items, draft_team.roster.items);
+    }
+    var full_starter_count: usize = 0;
+    for (replacements.items) |replacement| full_starter_count += replacement.full_starters;
+    var allocated_bench_slots: usize = 0;
+    if (full_starter_count > 0) {
+        for (replacements.items) |*replacement| {
+            const numerator = open_bench_slots * replacement.full_starters;
+            const bench_players = numerator / full_starter_count;
+            replacement.expected_players = replacement.remaining_starters + bench_players;
+            replacement.bench_remainder = numerator % full_starter_count;
+            allocated_bench_slots += bench_players;
+        }
+        std.mem.sort(Replacement, replacements.items, {}, benchAllocationOrder);
+        for (replacements.items[0 .. open_bench_slots - allocated_bench_slots]) |*replacement| {
+            replacement.expected_players += 1;
+        }
+    }
+
+    var valued_players: std.ArrayList(usize) = .empty;
+    defer valued_players.deinit(allocator);
+    var position_players: std.ArrayList(usize) = .empty;
+    defer position_players.deinit(allocator);
+    for (replacements.items) |*replacement| {
+        position_players.clearRetainingCapacity();
+        for (remaining.items, 0..) |remaining_player, candidate_index| {
+            if (std.mem.eql(u8, remaining_player.position, replacement.position))
+                try position_players.append(allocator, candidate_index);
+        }
+        std.mem.sort(usize, position_players.items, remaining.items, projectedCandidateIndexOrder);
+        const selected_count = @min(replacement.expected_players, position_players.items.len);
+        if (selected_count == 0) continue;
+        try valued_players.appendSlice(allocator, position_players.items[0..selected_count]);
+        replacement.points_units = remaining.items[position_players.items[selected_count - 1]].points_units;
+    }
+
+    const nominee_index = candidateIndex(remaining.items, player_id).?;
+    const nominee = remaining.items[nominee_index];
+    const replacement_units = if (replacementIndex(replacements.items, nominee.position)) |index|
+        replacements.items[index].points_units
+    else
+        0;
+    const vorp_units = @max(nominee.points_units - replacement_units, 0);
+
+    var remaining_money: i64 = 0;
+    var remaining_roster_slots: i64 = 0;
+    for (state.teams.items) |draft_team| {
+        remaining_money += draft_team.remaining_budget;
+        remaining_roster_slots += @as(i64, @intCast(state.roster_slots.items.len -| draft_team.roster.items.len));
+    }
+    const discretionary_dollars = @max(remaining_money - remaining_roster_slots, 0);
+    const fair_value = fairValue(
+        remaining.items,
+        valued_players.items,
+        replacements.items,
+        nominee_index,
+        discretionary_dollars,
+    );
+
+    const empty_slots = state.roster_slots.items.len -| team.roster.items.len;
+    const legal_max = if (empty_slots == 0)
+        0
+    else
+        @max(team.remaining_budget - @as(i32, @intCast(empty_slots - 1)), 0);
+    const has_roster_slot = hasOpenCompatibleSlot(state.roster_slots.items, team.roster.items, nominee.position, accepts);
+
+    var starter_slots: std.ArrayList(i32) = .empty;
+    defer starter_slots.deinit(allocator);
+    for (state.roster_slots.items) |slot_id| {
+        if (!isBench(slot_id)) try starter_slots.append(allocator, slot_id);
+    }
 
     var owned: std.ArrayList(Candidate) = .empty;
     defer owned.deinit(allocator);
     for (team.roster.items) |purchase| {
         const owned_player = state.players.get(purchase.player_id).?;
-        const value = playerValue(owned_player.position, owned_player.estimated_price);
-        realized_difference += value - purchase.cost;
-        try owned.append(allocator, .{
-            .id = purchase.player_id,
-            .position = owned_player.position,
-            .value = value,
-            .expected_cost = 0,
-            .owned = true,
-            .nominee = false,
-        });
+        try owned.append(allocator, candidate(purchase.player_id, &owned_player));
     }
-    std.mem.sort(Candidate, owned.items, {}, candidateIdOrder);
+    std.mem.sort(Candidate, owned.items, {}, candidateOrder);
 
-    var future: std.ArrayList(Candidate) = .empty;
-    defer future.deinit(allocator);
-    var players = state.players.iterator();
-    while (players.next()) |entry| {
-        if (drafted.contains(entry.key_ptr.*) or entry.key_ptr.* == player_id) continue;
-        const candidate = entry.value_ptr;
-        const value = playerValue(candidate.position, candidate.estimated_price);
-        try future.append(allocator, .{
-            .id = entry.key_ptr.*,
-            .position = candidate.position,
-            .value = value,
-            .expected_cost = expectedCost(candidate.position, value, inflation),
-            .owned = false,
-            .nominee = false,
-        });
-    }
-    std.mem.sort(Candidate, future.items, {}, futureOrder);
-    reduceFutureCandidates(&future, roster_size);
+    const baseline = try maximumAssignment(allocator, starter_slots.items, owned.items, null, accepts);
+    defer allocator.free(baseline);
+    const baseline_points = assignmentPoints(baseline, owned.items);
 
-    var baseline_candidates: std.ArrayList(Candidate) = .empty;
-    defer baseline_candidates.deinit(allocator);
-    try baseline_candidates.appendSlice(allocator, owned.items);
-    try baseline_candidates.appendSlice(allocator, future.items);
-    std.mem.sort(Candidate, baseline_candidates.items, {}, candidateIdOrder);
+    var with_nominee: std.ArrayList(Candidate) = .empty;
+    defer with_nominee.deinit(allocator);
+    try with_nominee.appendSlice(allocator, owned.items);
+    try with_nominee.append(allocator, nominee);
+    std.mem.sort(Candidate, with_nominee.items, {}, candidateOrder);
+    const personal_nominee_index = candidateIndex(with_nominee.items, player_id).?;
+    const forced = try maximumAssignment(allocator, starter_slots.items, with_nominee.items, player_id, accepts);
+    defer allocator.free(forced);
+    const forced_points = assignmentPoints(forced, with_nominee.items);
+    const nominee_starts = std.mem.indexOfScalar(usize, forced, personal_nominee_index) != null;
 
-    const baseline = try solvePlan(
-        allocator,
-        state.roster_slots.items,
-        baseline_candidates.items,
-        team.remaining_budget,
-        realized_difference,
-        true,
-        accepts,
-    );
-    const baseline_reaches_floor = if (baseline) |result|
-        plannedDifference(result.plan, realized_difference) >= protected_difference
-    else
-        false;
-
-    var forced_nominee_cost = @min(nominated_expected_cost, legal_max);
-    var forced_candidates: std.ArrayList(Candidate) = .empty;
-    defer forced_candidates.deinit(allocator);
-    try forced_candidates.appendSlice(allocator, baseline_candidates.items);
-    try forced_candidates.append(allocator, .{
-        .id = player_id,
-        .position = player.position,
-        .value = nominated_value,
-        .expected_cost = forced_nominee_cost,
-        .owned = false,
-        .nominee = true,
-    });
-    std.mem.sort(Candidate, forced_candidates.items, {}, candidateIdOrder);
-
-    var forced_result = try solvePlan(
-        allocator,
-        state.roster_slots.items,
-        forced_candidates.items,
-        team.remaining_budget,
-        realized_difference,
-        baseline_reaches_floor,
-        accepts,
-    );
-    if (forced_nominee_cost != 1 and
-        (forced_result == null or (baseline_reaches_floor and !forced_result.?.floor_feasible)))
-    {
-        forced_nominee_cost = 1;
-        for (forced_candidates.items) |*candidate| {
-            if (candidate.nominee) candidate.expected_cost = forced_nominee_cost;
+    var open_compatible_starter = false;
+    for (baseline, starter_slots.items) |candidate_index, slot_id| {
+        if (candidate_index >= owned.items.len and accepts(slot_id, nominee.position)) {
+            open_compatible_starter = true;
+            break;
         }
-        forced_result = try solvePlan(
-            allocator,
-            state.roster_slots.items,
-            forced_candidates.items,
-            team.remaining_budget,
-            realized_difference,
-            baseline_reaches_floor,
-            accepts,
-        );
     }
-    const selected_forced_result = forced_result orelse return .{
-        .player_id = player_id,
-        .estimated_value = nominated_value,
-        .expected_cost = nominated_expected_cost,
-        .legal_max = legal_max,
-        .starter_value = if (baseline) |result| result.plan.starter_value else 0,
-        .bench_value = if (baseline) |result| result.plan.bench_value else 0,
-    };
-    const forced = selected_forced_result.plan;
+    const improves_lineup = nominee_starts and forced_points > baseline_points;
+    const role: @TypeOf(state.recommendation.role) = if (open_compatible_starter or improves_lineup) .starter else .bench;
+    const personal_marginal_units = if (role == .starter) @max(forced_points - baseline_points, 0) else 0;
 
-    var improves_roster = true;
-    var marginal_value = nominated_value;
-    var avoided_expected_cost: i32 = 0;
-    if (baseline) |baseline_result| {
-        const baseline_plan = baseline_result.plan;
-        const starter_change = forced.starter_value - baseline_plan.starter_value;
-        const bench_change = forced.bench_value - baseline_plan.bench_value;
-        improves_roster = starter_change > 0 or (starter_change == 0 and bench_change >= 0);
-        marginal_value = if (starter_change > 0)
-            starter_change
-        else if (starter_change == 0 and bench_change > 0)
-            bench_change
-        else
-            0;
-        avoided_expected_cost = @max(
-            baseline_plan.expected_spend - (forced.expected_spend - forced_nominee_cost),
-            0,
-        );
-    }
+    var max_bid = @min(fair_value, legal_max);
+    if (role == .bench) max_bid = @min(max_bid, 1);
+    if (nominee.points_units < replacement_units) max_bid = 0;
+    if (!has_roster_slot or legal_max == 0) max_bid = 0;
+    if (std.mem.eql(u8, nominee.position, "D/ST")) max_bid = @min(max_bid, 1);
 
-    const nominee_slot = nomineeSlot(forced, player_id, roster_size).?;
-    const projected_starter = !isBench(state.roster_slots.items[nominee_slot]);
-    const other_expected_spend = forced.expected_spend - forced_nominee_cost;
-    const budget_capacity = team.remaining_budget - other_expected_spend;
-    const marginal_capacity = avoided_expected_cost + marginal_value;
-    const difference_capacity = realized_difference + forced.future_value - other_expected_spend - protected_difference;
-    const floor_required = baseline_reaches_floor;
-
-    var max_bid: i32 = 0;
-    if (improves_roster and (!floor_required or difference_capacity >= 1)) {
-        max_bid = @min(legal_max, @min(budget_capacity, marginal_capacity));
-        if (floor_required) max_bid = @min(max_bid, difference_capacity);
-        max_bid = @max(max_bid, 0);
-        if (std.mem.eql(u8, player.position, "D/ST")) max_bid = @min(max_bid, 1);
-    }
+    const reason: @TypeOf(state.recommendation.reason) = if (!has_roster_slot)
+        .no_compatible_roster_slot
+    else if (legal_max == 0)
+        .no_legal_budget
+    else if (nominee.points_units < replacement_units)
+        .below_replacement_level
+    else if (role == .bench and max_bid == 0)
+        .does_not_improve_starting_lineup
+    else
+        .none;
 
     const next_bid = if (state.auction.bid_team_id == null and state.auction.bid_amount == 0)
         1
@@ -228,125 +210,105 @@ pub fn recommend(allocator: std.mem.Allocator, state: anytype, accepts: *const f
     return .{
         .action = action,
         .player_id = player_id,
-        .estimated_value = nominated_value,
-        .expected_cost = nominated_expected_cost,
-        .marginal_value = marginal_value,
+        .projected_points = nominee.points,
+        .replacement_points = unitsToPoints(replacement_units),
+        .vorp_points = unitsToPoints(vorp_units),
+        .personal_marginal_points = unitsToPoints(personal_marginal_units),
+        .fair_value = fair_value,
         .max_bid = max_bid,
         .legal_max = legal_max,
-        .projected_starter = projected_starter,
-        .starter_value = if (baseline) |result| result.plan.starter_value else forced.starter_value,
-        .bench_value = if (baseline) |result| result.plan.bench_value else forced.bench_value,
+        .role = role,
+        .reason = reason,
     };
 }
 
-fn solvePlan(
-    allocator: std.mem.Allocator,
-    slots: []const i32,
-    candidates: []const Candidate,
-    remaining_budget: i32,
-    realized_difference: i32,
-    protect_difference: bool,
-    accepts: *const fn (i32, []const u8) bool,
-) !?PlanResult {
-    const fallback = (try minimumCostPlan(allocator, slots, candidates, accepts)) orelse return null;
-    if (fallback.expected_spend > remaining_budget) return null;
-
-    var current: std.ArrayList(Plan) = .empty;
-    defer current.deinit(allocator);
-    var next: std.ArrayList(Plan) = .empty;
-    defer next.deinit(allocator);
-    try current.append(allocator, .{});
-
-    for (candidates) |candidate| {
-        if (!candidate.owned and !candidate.nominee) continue;
-        next.clearRetainingCapacity();
-        for (current.items) |plan| {
-            for (slots, 0..) |slot_id, slot_index| {
-                if (plan.player_by_slot[slot_index] != unassigned_player) continue;
-                if (!accepts(slot_id, candidate.position)) continue;
-                var placed = plan;
-                placeCandidate(&placed, candidate, slot_id, slot_index);
-                try next.append(allocator, placed);
-            }
-        }
-        if (next.items.len == 0) return fallbackResult(fallback, realized_difference);
-        try trimPlans(allocator, &next, slots.len);
-        std.mem.swap(std.ArrayList(Plan), &current, &next);
-    }
-
-    for (slots, 0..) |slot_id, slot_index| {
-        next.clearRetainingCapacity();
-        for (current.items) |plan| {
-            if (plan.player_by_slot[slot_index] != unassigned_player) {
-                try next.append(allocator, plan);
-                continue;
-            }
-            for (candidates) |candidate| {
-                if (candidate.owned or candidate.nominee) continue;
-                if (!accepts(slot_id, candidate.position)) continue;
-                if (hasPlayer(plan, candidate.id, slots.len)) continue;
-                var placed = plan;
-                placeCandidate(&placed, candidate, slot_id, slot_index);
-                if (!canFinishWithinBudget(placed, slots.len, remaining_budget)) continue;
-                try next.append(allocator, placed);
-            }
-        }
-        if (next.items.len == 0) return fallbackResult(fallback, realized_difference);
-        try trimPlans(allocator, &next, slots.len);
-        std.mem.swap(std.ArrayList(Plan), &current, &next);
-    }
-
-    var floor_feasible = false;
-    for (current.items) |plan| {
-        if (plannedDifference(plan, realized_difference) >= protected_difference) {
-            floor_feasible = true;
-            break;
-        }
-    }
-
-    var best: ?Plan = null;
-    for (current.items) |plan| {
-        if (plan.expected_spend > remaining_budget) continue;
-        if (protect_difference and
-            floor_feasible and
-            plannedDifference(plan, realized_difference) < protected_difference)
-        {
-            continue;
-        }
-        if (best == null or betterCompletePlan(plan, best.?, slots.len, realized_difference)) best = plan;
-    }
-    if (best) |plan| return .{ .plan = plan, .floor_feasible = floor_feasible };
-    return fallbackResult(fallback, realized_difference);
-}
-
-fn fallbackResult(plan: Plan, realized_difference: i32) PlanResult {
+fn candidate(id: i32, player: anytype) Candidate {
     return .{
-        .plan = plan,
-        .floor_feasible = plannedDifference(plan, realized_difference) >= protected_difference,
+        .id = id,
+        .position = player.position,
+        .points = player.projected_points,
+        .points_units = pointsToUnits(player.projected_points),
     };
 }
 
-fn minimumCostPlan(
+fn pointsToUnits(points: f64) i64 {
+    return @intFromFloat(@round(@max(points, 0) * 1000));
+}
+
+fn unitsToPoints(units: i64) f64 {
+    return @as(f64, @floatFromInt(units)) / 1000;
+}
+
+fn appendOpenSlots(
+    allocator: std.mem.Allocator,
+    open: *std.ArrayList(i32),
+    configured: []const i32,
+    roster: anytype,
+    starters_only: bool,
+) !void {
+    for (configured, 0..) |slot_id, index| {
+        if (starters_only and isBench(slot_id)) continue;
+        var occurrence: usize = 0;
+        for (configured[0..index]) |previous| {
+            if (previous == slot_id) occurrence += 1;
+        }
+        var occupied: usize = 0;
+        for (roster) |purchase| {
+            if (purchase.slot_id == slot_id) occupied += 1;
+        }
+        if (occupied <= occurrence) try open.append(allocator, slot_id);
+    }
+}
+
+fn countOpenBenchSlots(configured: []const i32, roster: anytype) usize {
+    var open: usize = 0;
+    for (configured, 0..) |slot_id, index| {
+        if (!isBench(slot_id)) continue;
+        var occurrence: usize = 0;
+        for (configured[0..index]) |previous| {
+            if (previous == slot_id) occurrence += 1;
+        }
+        var occupied: usize = 0;
+        for (roster) |purchase| {
+            if (purchase.slot_id == slot_id) occupied += 1;
+        }
+        if (occupied <= occurrence) open += 1;
+    }
+    return open;
+}
+
+fn hasOpenCompatibleSlot(
+    configured: []const i32,
+    roster: anytype,
+    position: []const u8,
+    accepts: *const fn (i32, []const u8) bool,
+) bool {
+    for (configured, 0..) |slot_id, index| {
+        if (!accepts(slot_id, position)) continue;
+        var occurrence: usize = 0;
+        for (configured[0..index]) |previous| {
+            if (previous == slot_id) occurrence += 1;
+        }
+        var occupied: usize = 0;
+        for (roster) |purchase| {
+            if (purchase.slot_id == slot_id) occupied += 1;
+        }
+        if (occupied <= occurrence) return true;
+    }
+    return false;
+}
+
+fn maximumAssignment(
     allocator: std.mem.Allocator,
     slots: []const i32,
     candidates: []const Candidate,
+    preferred_id: ?i32,
     accepts: *const fn (i32, []const u8) bool,
-) !?Plan {
-    if (candidates.len < slots.len) return null;
-
-    var mandatory_count: usize = 0;
-    var max_expected_cost: i64 = 1;
-    for (candidates) |candidate| {
-        if (candidate.owned or candidate.nominee) mandatory_count += 1;
-        max_expected_cost = @max(max_expected_cost, candidate.expected_cost);
-    }
-    if (mandatory_count > slots.len) return null;
-
-    const spend_bound = max_expected_cost * @as(i64, @intCast(slots.len));
-    const mandatory_bonus = spend_bound + 1;
-    const impossible_cost = mandatory_bonus * @as(i64, @intCast(mandatory_count + 1)) + spend_bound + 1;
+) ![]usize {
     const row_count = slots.len;
-    const column_count = candidates.len;
+    const column_count = candidates.len + row_count;
+    const result = try allocator.alloc(usize, row_count);
+    if (row_count == 0) return result;
 
     var u = try allocator.alloc(i64, row_count + 1);
     defer allocator.free(u);
@@ -378,12 +340,14 @@ fn minimumCostPlan(
 
             for (1..column_count + 1) |candidate_column| {
                 if (used[candidate_column]) continue;
-                const candidate = candidates[candidate_column - 1];
-                const mandatory = candidate.owned or candidate.nominee;
-                const cost = if (accepts(slots[current_row - 1], candidate.position))
-                    @as(i64, candidate.expected_cost) - (if (mandatory) mandatory_bonus else 0)
+                const candidate_index = candidate_column - 1;
+                const cost = if (candidate_index >= candidates.len)
+                    @as(i64, 0)
+                else if (!accepts(slots[current_row - 1], candidates[candidate_index].position))
+                    impossible_cost
                 else
-                    impossible_cost;
+                    -(candidates[candidate_index].points_units * 2 +
+                        @as(i64, if (preferred_id == candidates[candidate_index].id) 1 else 0));
                 const reduced_cost = cost - u[current_row] - v[candidate_column];
                 if (reduced_cost < minimum[candidate_column]) {
                     minimum[candidate_column] = reduced_cost;
@@ -415,208 +379,112 @@ fn minimumCostPlan(
         }
     }
 
-    var candidate_by_slot: [max_plan_slots]usize = undefined;
     for (1..column_count + 1) |column| {
-        if (matched_row[column] != 0) candidate_by_slot[matched_row[column] - 1] = column - 1;
+        if (matched_row[column] != 0) result[matched_row[column] - 1] = column - 1;
     }
+    return result;
+}
 
-    var selected_mandatory: usize = 0;
-    var plan: Plan = .{};
-    for (candidate_by_slot[0..row_count], 0..) |candidate_index, slot_index| {
-        const candidate = candidates[candidate_index];
-        if (!accepts(slots[slot_index], candidate.position)) return null;
-        if (candidate.owned or candidate.nominee) selected_mandatory += 1;
-        placeCandidate(&plan, candidate, slots[slot_index], slot_index);
+fn assignmentPoints(assignment: []const usize, candidates: []const Candidate) i64 {
+    var total: i64 = 0;
+    for (assignment) |candidate_index| {
+        if (candidate_index < candidates.len) total += candidates[candidate_index].points_units;
     }
-    if (selected_mandatory != mandatory_count) return null;
-    return plan;
+    return total;
 }
 
-fn placeCandidate(plan: *Plan, candidate: Candidate, slot_id: i32, slot_index: usize) void {
-    plan.player_by_slot[slot_index] = candidate.id;
-    if (isBench(slot_id)) {
-        plan.bench_value += candidate.value;
-    } else {
-        plan.starter_value += candidate.value;
+fn fairValue(
+    candidates: []const Candidate,
+    assignment: []const usize,
+    replacements: []const Replacement,
+    nominee_index: usize,
+    discretionary_dollars: i64,
+) i32 {
+    if (std.mem.indexOfScalar(usize, assignment, nominee_index) == null) return 1;
+
+    var total_vorp: i64 = 0;
+    for (assignment) |candidate_index| {
+        if (candidate_index >= candidates.len) continue;
+        total_vorp += candidateVorp(candidates[candidate_index], replacements);
     }
-    if (candidate.owned) return;
-    plan.future_value += candidate.value;
-    plan.expected_spend += candidate.expected_cost;
-}
+    if (total_vorp == 0) return 1;
 
-fn canFinishWithinBudget(plan: Plan, slot_count: usize, remaining_budget: i32) bool {
-    var unfilled: i32 = 0;
-    for (plan.player_by_slot[0..slot_count]) |player_id| {
-        if (player_id == unassigned_player) unfilled += 1;
+    const nominee_vorp = candidateVorp(candidates[nominee_index], replacements);
+    const numerator = discretionary_dollars * nominee_vorp;
+    var share = @divFloor(numerator, total_vorp);
+    const nominee_remainder = @mod(numerator, total_vorp);
+
+    var floor_total: i64 = 0;
+    for (assignment) |candidate_index| {
+        if (candidate_index >= candidates.len) continue;
+        floor_total += @divFloor(
+            discretionary_dollars * candidateVorp(candidates[candidate_index], replacements),
+            total_vorp,
+        );
     }
-    return plan.expected_spend + unfilled <= remaining_budget;
-}
-
-fn hasPlayer(plan: Plan, player_id: i32, slot_count: usize) bool {
-    return std.mem.indexOfScalar(i32, plan.player_by_slot[0..slot_count], player_id) != null;
-}
-
-fn nomineeSlot(plan: Plan, player_id: i32, slot_count: usize) ?usize {
-    return std.mem.indexOfScalar(i32, plan.player_by_slot[0..slot_count], player_id);
-}
-
-fn trimPlans(allocator: std.mem.Allocator, plans: *std.ArrayList(Plan), slot_count: usize) !void {
-    if (plans.items.len <= beam_width) return;
-
-    var selected: std.ArrayList(Plan) = .empty;
-    defer selected.deinit(allocator);
-
-    std.mem.sort(Plan, plans.items, slot_count, qualityPartialOrder);
-    for (plans.items[0..@min(quality_beam_width, plans.items.len)]) |plan| {
-        try selected.append(allocator, plan);
-    }
-
-    std.mem.sort(Plan, plans.items, slot_count, differencePartialOrder);
-    for (plans.items) |plan| {
-        if (selected.items.len >= quality_beam_width + difference_beam_width) break;
-        if (!containsPlan(selected.items, plan, slot_count)) try selected.append(allocator, plan);
-    }
-
-    std.mem.sort(Plan, plans.items, slot_count, cheapPartialOrder);
-    for (plans.items) |plan| {
-        if (selected.items.len == beam_width) break;
-        if (!containsPlan(selected.items, plan, slot_count)) try selected.append(allocator, plan);
-    }
-
-    if (selected.items.len < beam_width) {
-        std.mem.sort(Plan, plans.items, slot_count, qualityPartialOrder);
-        for (plans.items) |plan| {
-            if (selected.items.len == beam_width) break;
-            if (!containsPlan(selected.items, plan, slot_count)) try selected.append(allocator, plan);
-        }
-    }
-
-    plans.clearRetainingCapacity();
-    try plans.appendSlice(allocator, selected.items);
-}
-
-fn containsPlan(plans: []const Plan, candidate: Plan, slot_count: usize) bool {
-    for (plans) |plan| {
-        if (std.mem.eql(i32, plan.player_by_slot[0..slot_count], candidate.player_by_slot[0..slot_count])) return true;
-    }
-    return false;
-}
-
-fn qualityPartialOrder(slot_count: usize, left: Plan, right: Plan) bool {
-    if (left.starter_value != right.starter_value) return left.starter_value > right.starter_value;
-    if (left.bench_value != right.bench_value) return left.bench_value > right.bench_value;
-    const left_difference = left.future_value - left.expected_spend;
-    const right_difference = right.future_value - right.expected_spend;
-    if (left_difference != right_difference) return left_difference > right_difference;
-    if (left.expected_spend != right.expected_spend) return left.expected_spend < right.expected_spend;
-    return deterministicPlanOrder(left, right, slot_count);
-}
-
-fn differencePartialOrder(slot_count: usize, left: Plan, right: Plan) bool {
-    const left_difference = left.future_value - left.expected_spend;
-    const right_difference = right.future_value - right.expected_spend;
-    if (left_difference != right_difference) return left_difference > right_difference;
-    if (left.starter_value != right.starter_value) return left.starter_value > right.starter_value;
-    if (left.bench_value != right.bench_value) return left.bench_value > right.bench_value;
-    if (left.expected_spend != right.expected_spend) return left.expected_spend < right.expected_spend;
-    return deterministicPlanOrder(left, right, slot_count);
-}
-
-fn cheapPartialOrder(slot_count: usize, left: Plan, right: Plan) bool {
-    if (left.expected_spend != right.expected_spend) return left.expected_spend < right.expected_spend;
-    if (left.starter_value != right.starter_value) return left.starter_value > right.starter_value;
-    if (left.bench_value != right.bench_value) return left.bench_value > right.bench_value;
-    return deterministicPlanOrder(left, right, slot_count);
-}
-
-fn betterCompletePlan(left: Plan, right: Plan, slot_count: usize, realized_difference: i32) bool {
-    if (left.starter_value != right.starter_value) return left.starter_value > right.starter_value;
-    if (left.bench_value != right.bench_value) return left.bench_value > right.bench_value;
-    const left_difference = plannedDifference(left, realized_difference);
-    const right_difference = plannedDifference(right, realized_difference);
-    if (left_difference != right_difference) return left_difference > right_difference;
-    if (left.expected_spend != right.expected_spend) return left.expected_spend < right.expected_spend;
-    return deterministicPlanOrder(left, right, slot_count);
-}
-
-fn deterministicPlanOrder(left: Plan, right: Plan, slot_count: usize) bool {
-    for (left.player_by_slot[0..slot_count], right.player_by_slot[0..slot_count]) |left_id, right_id| {
-        if (left_id != right_id) return left_id < right_id;
-    }
-    return false;
-}
-
-fn plannedDifference(plan: Plan, realized_difference: i32) i32 {
-    return realized_difference + plan.future_value - plan.expected_spend;
-}
-
-fn marketInflation(state: anytype) Inflation {
-    var inflation: Inflation = .{};
-    for (state.teams.items) |team| {
-        for (team.roster.items) |purchase| {
-            const player = state.players.get(purchase.player_id).?;
-            const value = playerValue(player.position, player.estimated_price);
-            inflation.numerator += @max(purchase.cost - 1, 0);
-            inflation.denominator += @max(value - 1, 0);
-        }
-    }
-    return inflation;
-}
-
-fn expectedCost(position: []const u8, value: i32, inflation: Inflation) i32 {
-    if (std.mem.eql(u8, position, "D/ST")) return 1;
-    const discretionary_value: i64 = @max(value - 1, 0);
-    const adjusted = @divFloor(
-        discretionary_value * inflation.numerator + @divFloor(inflation.denominator, 2),
-        inflation.denominator,
-    );
-    return 1 + @as(i32, @intCast(adjusted));
-}
-
-fn reduceFutureCandidates(candidates: *std.ArrayList(Candidate), roster_size: usize) void {
-    var group_start: usize = 0;
-    var write_index: usize = 0;
-    while (group_start < candidates.items.len) {
-        var group_end = group_start + 1;
-        while (group_end < candidates.items.len and
-            std.mem.eql(u8, candidates.items[group_start].position, candidates.items[group_end].position))
+    const leftover = discretionary_dollars - floor_total;
+    var remainder_rank: i64 = 0;
+    for (assignment) |candidate_index| {
+        if (candidate_index >= candidates.len or candidate_index == nominee_index) continue;
+        const selected = candidates[candidate_index];
+        const remainder = @mod(discretionary_dollars * candidateVorp(selected, replacements), total_vorp);
+        if (remainder > nominee_remainder or
+            (remainder == nominee_remainder and selected.id < candidates[nominee_index].id))
         {
-            group_end += 1;
+            remainder_rank += 1;
         }
-
-        const group_len = group_end - group_start;
-        const quality_count = @min(quality_candidates_per_position, group_len);
-        for (candidates.items[group_start .. group_start + quality_count]) |candidate| {
-            candidates.items[write_index] = candidate;
-            write_index += 1;
-        }
-
-        const cheap_start = @max(group_start + quality_count, group_end -| roster_size);
-        for (candidates.items[cheap_start..group_end]) |candidate| {
-            candidates.items[write_index] = candidate;
-            write_index += 1;
-        }
-        group_start = group_end;
     }
-    candidates.items.len = write_index;
+    if (remainder_rank < leftover) share += 1;
+    return 1 + @as(i32, @intCast(share));
 }
 
-fn playerValue(position: []const u8, estimated_price: i32) i32 {
-    if (std.mem.eql(u8, position, "D/ST")) return 1;
-    return estimated_price;
+fn candidateVorp(value: Candidate, replacements: []const Replacement) i64 {
+    const replacement = if (replacementIndex(replacements, value.position)) |index|
+        replacements[index].points_units
+    else
+        0;
+    return @max(value.points_units - replacement, 0);
+}
+
+fn replacementIndexOrAppend(
+    allocator: std.mem.Allocator,
+    replacements: *std.ArrayList(Replacement),
+    position: []const u8,
+) !usize {
+    if (replacementIndex(replacements.items, position)) |index| return index;
+    try replacements.append(allocator, .{ .position = position });
+    return replacements.items.len - 1;
+}
+
+fn replacementIndex(replacements: []const Replacement, position: []const u8) ?usize {
+    for (replacements, 0..) |replacement, index| {
+        if (std.mem.eql(u8, replacement.position, position)) return index;
+    }
+    return null;
+}
+
+fn candidateIndex(candidates: []const Candidate, id: i32) ?usize {
+    for (candidates, 0..) |value, index| {
+        if (value.id == id) return index;
+    }
+    return null;
 }
 
 fn isBench(slot_id: i32) bool {
     return std.mem.indexOfScalar(i32, &bench_slot_ids, slot_id) != null;
 }
 
-fn candidateIdOrder(_: void, left: Candidate, right: Candidate) bool {
-    return left.id < right.id;
+fn projectedCandidateIndexOrder(candidates: []const Candidate, left: usize, right: usize) bool {
+    if (candidates[left].points_units != candidates[right].points_units)
+        return candidates[left].points_units > candidates[right].points_units;
+    return candidates[left].id < candidates[right].id;
 }
 
-fn futureOrder(_: void, left: Candidate, right: Candidate) bool {
-    const position_order = std.mem.order(u8, left.position, right.position);
-    if (position_order != .eq) return position_order == .lt;
-    if (left.value != right.value) return left.value > right.value;
+fn benchAllocationOrder(_: void, left: Replacement, right: Replacement) bool {
+    if (left.bench_remainder != right.bench_remainder) return left.bench_remainder > right.bench_remainder;
+    return std.mem.order(u8, left.position, right.position) == .lt;
+}
+
+fn candidateOrder(_: void, left: Candidate, right: Candidate) bool {
     return left.id < right.id;
 }

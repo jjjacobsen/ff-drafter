@@ -14,6 +14,7 @@ pub const Player = struct {
     position: []u8,
     pro_team_id: i32,
     estimated_price: i32,
+    projected_points: f64,
     image_requested: bool = false,
     image: ?[]u8 = null,
 
@@ -71,17 +72,32 @@ pub const RecommendationAction = enum {
     pass,
 };
 
+pub const RecommendationRole = enum {
+    none,
+    starter,
+    bench,
+};
+
+pub const RecommendationReason = enum {
+    none,
+    no_compatible_roster_slot,
+    below_replacement_level,
+    does_not_improve_starting_lineup,
+    no_legal_budget,
+};
+
 pub const Recommendation = struct {
     action: RecommendationAction = .pass,
     player_id: ?i32 = null,
-    estimated_value: i32 = 0,
-    expected_cost: i32 = 0,
-    marginal_value: i32 = 0,
+    projected_points: f64 = 0,
+    replacement_points: f64 = 0,
+    vorp_points: f64 = 0,
+    personal_marginal_points: f64 = 0,
+    fair_value: i32 = 0,
     max_bid: i32 = 0,
     legal_max: i32 = 0,
-    projected_starter: bool = false,
-    starter_value: i32 = 0,
-    bench_value: i32 = 0,
+    role: RecommendationRole = .none,
+    reason: RecommendationReason = .none,
 };
 
 pub const State = struct {
@@ -168,6 +184,7 @@ pub const State = struct {
         position: []const u8,
         pro_team_id: i32,
         estimated_price: i32,
+        projected_points: f64,
     ) !void {
         self.recommendation_dirty = true;
         const player: Player = .{
@@ -175,6 +192,7 @@ pub const State = struct {
             .position = try self.allocator.dupe(u8, position),
             .pro_team_id = pro_team_id,
             .estimated_price = estimated_price,
+            .projected_points = projected_points,
         };
         errdefer {
             self.allocator.free(player.name);

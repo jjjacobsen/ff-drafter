@@ -108,7 +108,24 @@ The player records use this shape:
 
 Map names with `players[].player.fullName`, not `players[].fullName`
 
-The available-player response can omit drafted players and the player who is already up for bid. Resolve all missing completed-pick and current-block IDs in one authenticated league request to `draftInit` with `kona_player_info`. Send an `X-Fantasy-Filter` with a `players.filterIds.value` array, then read `fullName`, `defaultPositionId`, `proTeamId`, and `draftAuctionValue` from the returned fantasy player records
+### League-scoring projections
+
+The combined `draftInit` and `kona_player_info` response includes projections in `players[].player.stats[]`. Select the current-season record with:
+
+```text
+statSourceId = 1
+statSplitTypeId = 0
+scoringPeriodId = 0
+seasonId = league season
+```
+
+Some filtered compact responses omit `seasonId` and `scoringPeriodId`. For those records, match `externalId` to the decimal league season while still requiring `statSourceId = 1` and `statSplitTypeId = 0`
+
+Read projected season fantasy points from `appliedTotal`. The value uses the league scoring settings. Treat a missing matching record as zero projected points
+
+These ESPN source and split meanings were inferred from observed responses and are not based on official ESPN documentation
+
+The available-player response can omit drafted players and the player who is already up for bid. Resolve all missing completed-pick and current-block IDs in one authenticated league request to `draftInit` with `kona_player_info`. Send an `X-Fantasy-Filter` with a `players.filterIds.value` array, then read `fullName`, `defaultPositionId`, `proTeamId`, `draftAuctionValue`, and the matching projection from the returned fantasy player records
 
 ### Draft security token
 

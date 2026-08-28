@@ -35,7 +35,9 @@ The center panel shows one of these states:
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` together with the optimizer maximum, ESPN legal maximum, expected market cost, marginal roster value, and projected starter or bench role. The optimizer maximum is the only actionable bid limit. The legal maximum is diagnostic. A player without a complete budget-feasible roster fit gets a zero maximum and a clear explanation
+The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` with the optimizer maximum and ESPN legal maximum. A second line shows starter or bench role, projected season points, and VORP points. The optimizer maximum is the only actionable bid limit. The legal maximum is diagnostic
+
+A zero maximum has a specific explanation, such as no compatible roster slot, below replacement level, or no legal budget. ESPN auction value remains near the player name as informational context only
 
 The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads. Pressing `q` or `esc` opens an exit confirmation dialog. Press `y` or `enter` to exit, or press `n` or `esc` to cancel. A second `q` does not exit
 
@@ -55,7 +57,7 @@ Press `esc` or `q` to return to the main screen
 
 ## State synchronization
 
-The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, roster slot counts, all NFL players, positions, and ESPN auction values
+The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, roster slot counts, all NFL players, positions, ESPN auction values, and projected season fantasy points under the league scoring settings
 
 The worker then gets a temporary draft security token and joins the ESPN WebSocket room
 
@@ -86,7 +88,7 @@ An ESPN `ERROR` is a command-level response, not a disconnected socket. The work
 
 The WebSocket worker schedules and sends all actions. An approved bid waits one randomized 2 to 5 second delay. The schedule is capped by a randomized 2 to 3 second deadline threshold. A newer bid cancels the old schedule and creates a new one from the updated state
 
-Nominations wait 5 to 10 seconds and open at `$1`. The nomination evaluator calculates at most 8 full recommendations in descending ESPN-value order and prefers the largest difference between ESPN value and optimizer maximum. It stops early when the next unseen ESPN value minus `$1` cannot beat the selected score. Every action revalidates the turn, player, price, authoritative optimizer maximum, budget, and availability immediately before it is sent
+Nominations wait 5 to 10 seconds and open at `$1`. The nomination evaluator calculates at most 8 full recommendations in descending ESPN-value order. It prefers a high-interest player with a bench role and little personal starting-lineup value. Every action revalidates the turn, player, price, authoritative optimizer maximum, budget, and availability immediately before it is sent
 
 The WebSocket runs in one worker. The UI reads shared state under a mutex and receives Vaxis events when the state changes
 

@@ -475,16 +475,20 @@ fn drawAuction(
         }
 
         if (recommendation.player_id == player_id) {
-            const explanation = if (recommendation.max_bid == 0)
-                "No value-preserving roster plan"
+            const explanation = if (recommendation.max_bid == 0 and recommendation.reason != .none)
+                recommendationReason(recommendation.reason)
             else
                 std.fmt.allocPrint(
                     frame_allocator,
-                    "{s}  •  expected ${d}  •  marginal +${d}",
+                    "{s}  •  projected {d:.1} pts  •  VORP +{d:.1} pts",
                     .{
-                        if (recommendation.projected_starter) "Starter" else "Bench",
-                        recommendation.expected_cost,
-                        recommendation.marginal_value,
+                        switch (recommendation.role) {
+                            .starter => "Starter",
+                            .bench => "Bench",
+                            .none => "Unavailable",
+                        },
+                        recommendation.projected_points,
+                        recommendation.vorp_points,
                     },
                 ) catch unreachable;
             printCentered(content, 13, explanation, details_style);
@@ -765,6 +769,16 @@ fn formatClock(frame_allocator: std.mem.Allocator, milliseconds: i64) []const u8
         "{d}:{d:0>2}",
         .{ @divFloor(total_seconds, 60), seconds },
     ) catch unreachable;
+}
+
+fn recommendationReason(reason: draft.RecommendationReason) []const u8 {
+    return switch (reason) {
+        .none => "",
+        .no_compatible_roster_slot => "No compatible roster slot",
+        .below_replacement_level => "Below replacement level",
+        .does_not_improve_starting_lineup => "Does not improve the starting lineup",
+        .no_legal_budget => "No legal budget remains",
+    };
 }
 
 fn statusStyle(status: draft.Status) Cell.Style {

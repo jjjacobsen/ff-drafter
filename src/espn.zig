@@ -129,7 +129,7 @@ fn loadCatalog(
             );
         }
 
-        try addFantasyPlayers(state, players);
+        try addFantasyPlayers(state, players, config.season_id);
     }
 
     for (teams) |team_value| {
@@ -575,24 +575,27 @@ fn chooseNominee(allocator: std.mem.Allocator, state: *const draft.State) !?i32 
     std.mem.sort(NominationCandidate, candidates.items, {}, nominationValueOrder);
 
     var selected_player_id: ?i32 = null;
-    var selected_decoy_value: i32 = std.math.minInt(i32);
-    var selected_espn_value: i32 = -1;
-    var evaluated: usize = 0;
-    for (candidates.items) |candidate| {
-        if (evaluated == nomination_candidate_limit) break;
-        if (selected_player_id != null and candidate.espn_value - 1 <= selected_decoy_value) break;
+    var selected_is_bench = false;
+    var selected_interest: i32 = -1;
+    var selected_marginal: f64 = std.math.inf(f64);
+    for (candidates.items[0..@min(nomination_candidate_limit, candidates.items.len)]) |candidate| {
         const recommendation = try state.calculatePlayerRecommendation(candidate.player_id);
-        evaluated += 1;
         if (recommendation.max_bid < 1) continue;
-        const decoy_value = recommendation.estimated_value - recommendation.max_bid;
-        if (decoy_value > selected_decoy_value or
-            (decoy_value == selected_decoy_value and candidate.espn_value > selected_espn_value) or
-            (decoy_value == selected_decoy_value and candidate.espn_value == selected_espn_value and
-                (selected_player_id == null or candidate.player_id < selected_player_id.?)))
+        const is_bench = recommendation.role == .bench;
+        const interest = @max(candidate.espn_value, recommendation.fair_value);
+        if (selected_player_id == null or
+            (is_bench and !selected_is_bench) or
+            (is_bench == selected_is_bench and interest > selected_interest) or
+            (is_bench == selected_is_bench and interest == selected_interest and
+                recommendation.personal_marginal_points < selected_marginal) or
+            (is_bench == selected_is_bench and interest == selected_interest and
+                recommendation.personal_marginal_points == selected_marginal and
+                candidate.player_id < selected_player_id.?))
         {
             selected_player_id = candidate.player_id;
-            selected_decoy_value = decoy_value;
-            selected_espn_value = candidate.espn_value;
+            selected_is_bench = is_bench;
+            selected_interest = interest;
+            selected_marginal = recommendation.personal_marginal_points;
         }
     }
     return selected_player_id;
@@ -671,10 +674,10 @@ fn loadFantasyPlayers(
 
     const state = shared.lock();
     defer shared.unlock();
-    try addFantasyPlayers(state, parsed.value.object.get("players").?.array.items);
+    try addFantasyPlayers(state, parsed.value.object.get("players").?.array.items, config.season_id);
 }
 
-fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value) !void {
+fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value, season_id: i32) !void {
     for (players) |player_value| {
         const item = player_value.object;
         const player = item.get("player").?.object;
@@ -685,8 +688,52 @@ fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value) !void
             positionName(position_id),
             @intCast(player.get("proTeamId").?.integer),
             @intCast(item.get("draftAuctionValue").?.integer),
+            projectedPoints(player, season_id),
         );
     }
+}
+
+fn projectedPoints(player: std.json.ObjectMap, season_id: i32) f64 {
+    const stats = player.get("stats") orelse return 0;
+    var compact_match: ?f64 = null;
+    for (stats.array.items) |stat_value| {
+        const stat = stat_value.object;
+        if (jsonInt(stat.get("statSourceId") orelse continue) != 1 or
+            jsonInt(stat.get("statSplitTypeId") orelse continue) != 0)
+        {
+            continue;
+        }
+        const applied_total = jsonFloat(stat.get("appliedTotal") orelse continue);
+        const record_season = stat.get("seasonId");
+        const scoring_period = stat.get("scoringPeriodId");
+        if (record_season != null and scoring_period != null and
+            jsonInt(record_season.?) == season_id and jsonInt(scoring_period.?) == 0)
+        {
+            return applied_total;
+        }
+        if (record_season == null and scoring_period == null) {
+            const external_id = stat.get("externalId") orelse continue;
+            if (jsonInt(external_id) == season_id) compact_match = applied_total;
+        }
+    }
+    return compact_match orelse 0;
+}
+
+fn jsonInt(value: std.json.Value) i64 {
+    return switch (value) {
+        .integer => |number| number,
+        .float => |number| @intFromFloat(number),
+        .string => |text| std.fmt.parseInt(i64, text, 10) catch unreachable,
+        else => unreachable,
+    };
+}
+
+fn jsonFloat(value: std.json.Value) f64 {
+    return switch (value) {
+        .integer => |number| @floatFromInt(number),
+        .float => |number| number,
+        else => unreachable,
+    };
 }
 
 fn ensureNominatedPlayer(

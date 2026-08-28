@@ -79,3 +79,11 @@ The browser bundle's WebSocket transport appends `\n` to every command before se
 ## 2026-08-27: `INIT` includes transport padding after the Base64 payload
 
 A read-only snapshot probe saved the complete text after the `INIT` command and the Base64 decoder returned `InvalidPadding`. ESPN had appended a space and `#` transport padding after the Base64 value. Decoding only the first whitespace-delimited field matched the production message parser and unblocked snapshot inspection
+
+## 2026-08-27: Starter-only VORP concentrated the complete auction budget
+
+A live draft recommended `$94` for Jahmyr Gibbs and `$87` for Bijan Robinson. A read-only calculation from the live ESPN catalog reproduced the optimizer exactly: `$1,850` discretionary dollars were spread across only 90 starters with `3,124.9` total VORP, so Gibbs received `$94`. The assignment and projection parsing were correct. A bench-aware expected player pool increased total VORP to `7,287.2` and reduced Gibbs to `$57`
+
+## 2026-08-27: Zig 0.16 moved current-directory file reads to the I/O API
+
+A temporary live-catalog optimizer test used the old `std.fs.cwd().readFileAlloc` API and failed to compile. Zig 0.16 uses `std.Io.Dir.cwd().readFileAlloc` with an explicit `std.Io`. The independent live-data calculation and normal project build were sufficient, so the temporary test was removed
