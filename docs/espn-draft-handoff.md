@@ -4,7 +4,7 @@
 
 This document records what was learned while connecting to a live ESPN Fantasy Football practice auction and implementing the production draft controller
 
-The Zig application now synchronizes the live room, places optimizer-approved bids, and nominates players automatically. The temporary `/tmp` listener described below was used only during the initial protocol investigation
+The Zig application synchronizes the live room and retains the command transport for bids and nominations. No decision engine currently selects or schedules actions. The temporary `/tmp` listener described below was used only during the initial protocol investigation
 
 ## What the user must provide
 
@@ -346,7 +346,7 @@ The production controller confirms all relevant state immediately before it send
 
 ESPN should reject invalid commands, but the application must not depend on server rejection as its primary safety check
 
-The proof-of-concept listener was monitor-only. The production Zig controller reads the user's `autodraftTypeId` from `INIT`, sends `AUTODRAFT false` only when needed, then sends optimizer-controlled `NOMINATE` and `BID` commands
+The proof-of-concept listener was monitor-only. The Zig controller reads the user's `autodraftTypeId` from `INIT` and sends `AUTODRAFT false` only when needed. Its command writer supports `NOMINATE` and `BID`, but no decision engine currently invokes those actions
 
 ## Keepalive behavior
 

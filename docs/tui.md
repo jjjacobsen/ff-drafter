@@ -2,9 +2,9 @@
 
 ## Scope
 
-The application watches and autonomously controls ESPN Fantasy Football auction drafts
+The application watches ESPN Fantasy Football auction drafts
 
-Automation is active after live synchronization. It places optimizer-approved bids and nominates players when it is the user's turn. When `INIT` reports that ESPN autodraft is enabled, it disables ESPN autodraft so ESPN cannot bid independently of the optimizer
+The bid and nomination command transport remains in place, but no decision engine currently selects or schedules actions. When `INIT` reports that ESPN autodraft is enabled, the application disables ESPN autodraft
 
 ## Start the application
 
@@ -23,7 +23,7 @@ The application parses these query parameters from the URL:
 
 It reads `espn_s2` and `SWID` from `.env`
 
-Starting the application enables bidding and nominations immediately after live state synchronization
+Starting the application synchronizes the live draft state. It does not select bids or nominations
 
 ## Main screen
 
@@ -31,13 +31,11 @@ The top bar contains all teams in draft order. Each team box shows its name, ESP
 
 The center panel shows one of these states:
 
-- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, completed pick count, and optimizer recommendation
+- The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, completed pick count, and decision placeholders
 - The team that must nominate and its time remaining
 - A waiting message between auctions
 
-The optimizer recommendation appears in a separate section below the player, current bid, leading team, and clock. It shows `BID`, `HOLD`, or `PASS` with the optimizer maximum and ESPN legal maximum. A second line shows starter or bench role, projected season points, and VORP points. The optimizer maximum is the only actionable bid limit. The legal maximum is diagnostic
-
-A zero maximum has a specific explanation, such as no compatible roster slot, below replacement level, or no legal budget. ESPN auction value remains near the player name as informational context only
+Two decision lines appear below the player, current bid, leading team, and clock. Both lines show `tbd` until the new decision engine is implemented. ESPN auction value remains near the player name as informational context only
 
 The footer centers connection status above `hjkl navigation • esc/q exit`. These controls remain visible while draft data loads. Pressing `q` or `esc` opens an exit confirmation dialog. Press `y` or `enter` to exit, or press `n` or `esc` to cancel. A second `q` does not exit
 
@@ -57,7 +55,7 @@ Press `esc` or `q` to return to the main screen
 
 ## State synchronization
 
-The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, roster slot counts, all NFL players, positions, ESPN auction values, and projected season fantasy points under the league scoring settings
+The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, roster slot counts, all NFL players, positions, and ESPN auction values
 
 The worker then gets a temporary draft security token and joins the ESPN WebSocket room
 
@@ -80,19 +78,15 @@ After initialization, these messages update the state:
 - `UNDONE`
 - `SLOT_CHANGED`
 
-The decision engine recalculates under the same state mutex after these updates. The UI only renders the stored recommendation and never runs optimization work itself
+No decision engine runs after these updates
 
-The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker sends `AUTODRAFT false` only when that value reports enabled autodraft. This prevents repeated no-op commands and keeps ESPN and the optimizer from controlling the same team at the same time
+The `INIT` decoder reads the user's `autodraftTypeId`. The WebSocket worker sends `AUTODRAFT false` only when that value reports enabled autodraft, which prevents repeated no-op commands
 
-An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open, stops automation, and shows the complete error instead of reconnecting and repeating the rejected command
+An ESPN `ERROR` is a command-level response, not a disconnected socket. The worker keeps the connection open and shows the complete error instead of reconnecting
 
-The WebSocket worker schedules and sends all actions. An approved bid waits one randomized 2 to 5 second delay. The schedule is capped by a randomized 2 to 3 second deadline threshold. A newer bid cancels the old schedule and creates a new one from the updated state
-
-Nominations wait 5 to 10 seconds and open at `$1`. The nomination evaluator calculates at most 8 full recommendations in descending ESPN-value order. It prefers a high-interest player with a bench role and little personal starting-lineup value. Every action revalidates the turn, player, price, authoritative optimizer maximum, budget, and availability immediately before it is sent
+The WebSocket command writer still supports `BID` and `NOMINATE` actions. No code currently decides when to send them or which player and price to use
 
 The WebSocket runs in one worker. The UI reads shared state under a mutex and receives Vaxis events when the state changes
-
-See [Dynamic roster optimizer](optimizer.md) for the planning model and bid-value definitions
 
 ## Connection behavior
 

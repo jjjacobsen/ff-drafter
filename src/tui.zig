@@ -449,50 +449,14 @@ fn drawAuction(
         const bid = std.fmt.allocPrint(frame_allocator, "${d}", .{state.auction.bid_amount}) catch unreachable;
         printCentered(content, 5, bid, money);
 
-        const recommendation = state.recommendation;
-        if (recommendation.player_id == player_id) {
-            const action = switch (recommendation.action) {
-                .bid => "BID",
-                .hold => "HOLD",
-                .pass => "PASS",
-            };
-            const recommendation_text = std.fmt.allocPrint(
-                frame_allocator,
-                "{s}  •  max ${d}  •  legal ${d}",
-                .{ action, recommendation.max_bid, recommendation.legal_max },
-            ) catch unreachable;
-            printCentered(
-                content,
-                11,
-                recommendation_text,
-                if (recommendation.action == .bid) accent else details_style,
-            );
-        }
+        printCentered(content, 11, "tbd", details_style);
 
         if (state.auction.bid_team_id) |team_id| {
             const bidder = teamName(state, team_id) orelse "Unknown team";
             printCentered(content, 7, bidder, heading);
         }
 
-        if (recommendation.player_id == player_id) {
-            const explanation = if (recommendation.max_bid == 0 and recommendation.reason != .none)
-                recommendationReason(recommendation.reason)
-            else
-                std.fmt.allocPrint(
-                    frame_allocator,
-                    "{s}  •  projected {d:.1} pts  •  VORP +{d:.1} pts",
-                    .{
-                        switch (recommendation.role) {
-                            .starter => "Starter",
-                            .bench => "Bench",
-                            .none => "Unavailable",
-                        },
-                        recommendation.projected_points,
-                        recommendation.vorp_points,
-                    },
-                ) catch unreachable;
-            printCentered(content, 13, explanation, details_style);
-        }
+        printCentered(content, 13, "tbd", details_style);
 
         const remaining = state.clockRemainingMs(now_ms);
         const clock_text = formatClock(frame_allocator, remaining);
@@ -769,16 +733,6 @@ fn formatClock(frame_allocator: std.mem.Allocator, milliseconds: i64) []const u8
         "{d}:{d:0>2}",
         .{ @divFloor(total_seconds, 60), seconds },
     ) catch unreachable;
-}
-
-fn recommendationReason(reason: draft.RecommendationReason) []const u8 {
-    return switch (reason) {
-        .none => "",
-        .no_compatible_roster_slot => "No compatible roster slot",
-        .below_replacement_level => "Below replacement level",
-        .does_not_improve_starting_lineup => "Does not improve the starting lineup",
-        .no_legal_budget => "No legal budget remains",
-    };
 }
 
 fn statusStyle(status: draft.Status) Cell.Style {

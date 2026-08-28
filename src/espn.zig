@@ -12,27 +12,9 @@ const player_filter =
 const roster_slot_order = [_]i32{
     0, 1, 2, 3, 4, 5, 6, 23, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24, 20,
 };
-const nomination_candidate_limit = 8;
-
-const Automation = struct {
-    bid_player_id: ?i32 = null,
-    bid_amount: i32 = 0,
-    bid_due_ms: i64 = 0,
-    bid_sent: bool = false,
-    nomination_pick_number: ?i32 = null,
-    nomination_player_id: i32 = 0,
-    nomination_due_ms: i64 = 0,
-    nomination_sent: bool = false,
-};
-
 const OutgoingAction = union(enum) {
     bid: struct { player_id: i32, amount: i32 },
     nominate: struct { player_id: i32, amount: i32 },
-};
-
-const NominationCandidate = struct {
-    player_id: i32,
-    espn_value: i32,
 };
 
 pub fn run(
@@ -129,7 +111,7 @@ fn loadCatalog(
             );
         }
 
-        try addFantasyPlayers(state, players, config.season_id);
+        try addFantasyPlayers(state, players);
     }
 
     for (teams) |team_value| {
@@ -215,8 +197,6 @@ fn runConnection(
     const connected_at = std.Io.Timestamp.now(io, .awake).toMilliseconds();
     var last_ping_ms: i64 = 0;
     var last_tick_ms = connected_at;
-    var automation: Automation = .{};
-
     while (!shared.shouldStop()) {
         const now_awake_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
         if ((last_ping_ms == 0 and now_awake_ms - connected_at >= 1_000) or
@@ -240,11 +220,7 @@ fn runConnection(
         const message = client.read() catch |err| switch (err) {
             error.Closed => return error.DraftConnectionClosed,
             else => return err,
-        } orelse {
-            const action_time_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
-            try runAutomation(allocator, &client, shared, &automation, action_time_ms);
-            continue;
-        };
+        } orelse continue;
         defer client.done(message);
 
         switch (message.type) {
@@ -318,7 +294,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             try state.applyInit(&snapshot, nowTimes(io));
-            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
 
@@ -340,7 +315,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.setBid(team_id, player_id, amount, remaining, now_awake_ms);
-            try state.refreshRecommendation(false);
         }
         _ = try loop.tryPostEvent(.draft_update);
         try ensureNominatedPlayer(http, allocator, shared, loop, config, player_id);
@@ -359,7 +333,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.setClockMessage(time, team_id, player_id, amount, now_awake_ms);
-            try state.refreshRecommendation(false);
         }
         _ = try loop.tryPostEvent(.draft_update);
         if (player_id != -1 and player_id != 0)
@@ -374,7 +347,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.setNomination(team_id, remaining, now_awake_ms);
-            try state.refreshRecommendation(false);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -390,7 +362,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             try state.applySold(team_id, player_id, slot_id, amount, now_awake_ms);
-            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -404,7 +375,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.applyAdjusted(pick_number, new_price);
-            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -416,7 +386,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.applyUndone(pick_number);
-            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -431,7 +400,6 @@ fn handleMessage(
             const state = shared.lock();
             defer shared.unlock();
             state.applySlotChanged(team_id, player_id, new_slot_id);
-            try state.refreshRecommendation(true);
         }
         _ = try loop.tryPostEvent(.draft_update);
         return;
@@ -450,99 +418,6 @@ fn handleMessage(
     }
 }
 
-fn runAutomation(
-    allocator: std.mem.Allocator,
-    client: *websocket.Client,
-    shared: *draft.Shared,
-    automation: *Automation,
-    now_ms: i64,
-) !void {
-    var outgoing: ?OutgoingAction = null;
-
-    state_scope: {
-        const state = shared.lock();
-        defer shared.unlock();
-
-        if (state.status != .live) return;
-
-        if (state.auction.nomination_team_id == state.user_team_id) {
-            const remaining_ms = state.clockRemainingMs(now_ms);
-            if (remaining_ms <= 0) return;
-
-            if (automation.nomination_pick_number != state.next_pick_number) {
-                const player_id = try chooseNominee(allocator, state) orelse return;
-                const delay_ms = jitter(5_000, 10_000, entropy(now_ms, player_id, state.next_pick_number));
-                const latest_ms = now_ms + @max(remaining_ms - 3_000, 0);
-                automation.nomination_pick_number = state.next_pick_number;
-                automation.nomination_player_id = player_id;
-                automation.nomination_due_ms = @min(now_ms + delay_ms, latest_ms);
-                automation.nomination_sent = false;
-            }
-
-            if (!automation.nomination_sent and now_ms >= automation.nomination_due_ms) {
-                if (!state.isPlayerDrafted(automation.nomination_player_id)) {
-                    const recommendation = try state.calculatePlayerRecommendation(automation.nomination_player_id);
-                    if (recommendation.max_bid >= 1) {
-                        outgoing = .{ .nominate = .{
-                            .player_id = automation.nomination_player_id,
-                            .amount = 1,
-                        } };
-                        automation.nomination_sent = true;
-                    } else {
-                        automation.nomination_pick_number = null;
-                    }
-                } else {
-                    automation.nomination_pick_number = null;
-                }
-            }
-        } else {
-            automation.nomination_pick_number = null;
-            automation.nomination_sent = false;
-        }
-
-        const player_id = state.auction.player_id orelse {
-            automation.bid_player_id = null;
-            automation.bid_sent = false;
-            break :state_scope;
-        };
-        const recommendation = state.recommendation;
-        const next_bid = if (state.auction.bid_team_id == null and state.auction.bid_amount == 0)
-            1
-        else
-            state.auction.bid_amount + 1;
-        const remaining_ms = state.clockRemainingMs(now_ms);
-
-        if (recommendation.player_id != player_id or
-            recommendation.action != .bid or
-            next_bid > recommendation.max_bid or
-            remaining_ms <= 0)
-        {
-            automation.bid_player_id = null;
-            automation.bid_sent = false;
-            break :state_scope;
-        }
-
-        if (automation.bid_player_id != player_id or automation.bid_amount != next_bid) {
-            const action_entropy = entropy(now_ms, player_id, next_bid);
-            const delay_ms = jitter(2_000, 5_000, action_entropy);
-            const safety_ms = jitter(2_000, 3_000, action_entropy ^ 0xa0761d6478bd642f);
-            const latest_ms = now_ms + @max(remaining_ms - safety_ms, 0);
-
-            automation.bid_player_id = player_id;
-            automation.bid_amount = next_bid;
-            automation.bid_due_ms = @min(now_ms + delay_ms, latest_ms);
-            automation.bid_sent = false;
-        }
-
-        if (!automation.bid_sent and now_ms >= automation.bid_due_ms) {
-            outgoing = .{ .bid = .{ .player_id = player_id, .amount = next_bid } };
-            automation.bid_sent = true;
-        }
-    }
-
-    try sendAction(client, outgoing);
-}
-
 fn sendAction(client: *websocket.Client, outgoing: ?OutgoingAction) !void {
     const action = outgoing orelse return;
     var buffer: [64]u8 = undefined;
@@ -555,71 +430,6 @@ fn sendAction(client: *websocket.Client, outgoing: ?OutgoingAction) !void {
         ),
     };
     try client.writeText(message);
-}
-
-fn chooseNominee(allocator: std.mem.Allocator, state: *const draft.State) !?i32 {
-    var candidates: std.ArrayList(NominationCandidate) = .empty;
-    defer candidates.deinit(allocator);
-
-    var players = state.players.iterator();
-    while (players.next()) |entry| {
-        if (state.isPlayerDrafted(entry.key_ptr.*)) continue;
-        try candidates.append(allocator, .{
-            .player_id = entry.key_ptr.*,
-            .espn_value = if (std.mem.eql(u8, entry.value_ptr.position, "D/ST"))
-                1
-            else
-                entry.value_ptr.estimated_price,
-        });
-    }
-    std.mem.sort(NominationCandidate, candidates.items, {}, nominationValueOrder);
-
-    var selected_player_id: ?i32 = null;
-    var selected_is_bench = false;
-    var selected_interest: i32 = -1;
-    var selected_marginal: f64 = std.math.inf(f64);
-    for (candidates.items[0..@min(nomination_candidate_limit, candidates.items.len)]) |candidate| {
-        const recommendation = try state.calculatePlayerRecommendation(candidate.player_id);
-        if (recommendation.max_bid < 1) continue;
-        const is_bench = recommendation.role == .bench;
-        const interest = @max(candidate.espn_value, recommendation.fair_value);
-        if (selected_player_id == null or
-            (is_bench and !selected_is_bench) or
-            (is_bench == selected_is_bench and interest > selected_interest) or
-            (is_bench == selected_is_bench and interest == selected_interest and
-                recommendation.personal_marginal_points < selected_marginal) or
-            (is_bench == selected_is_bench and interest == selected_interest and
-                recommendation.personal_marginal_points == selected_marginal and
-                candidate.player_id < selected_player_id.?))
-        {
-            selected_player_id = candidate.player_id;
-            selected_is_bench = is_bench;
-            selected_interest = interest;
-            selected_marginal = recommendation.personal_marginal_points;
-        }
-    }
-    return selected_player_id;
-}
-
-fn nominationValueOrder(_: void, left: NominationCandidate, right: NominationCandidate) bool {
-    if (left.espn_value != right.espn_value) return left.espn_value > right.espn_value;
-    return left.player_id < right.player_id;
-}
-
-fn entropy(now_ms: i64, player_id: i32, amount: i32) u64 {
-    return @as(u64, @intCast(now_ms)) ^
-        (@as(u64, @as(u32, @bitCast(player_id))) << 32) ^
-        @as(u64, @as(u32, @bitCast(amount)));
-}
-
-fn jitter(min_ms: i64, max_ms: i64, seed: u64) i64 {
-    var value = seed;
-    value ^= value >> 12;
-    value ^= value << 25;
-    value ^= value >> 27;
-    value *%= 0x2545f4914f6cdd1d;
-    const range: u64 = @intCast(max_ms - min_ms + 1);
-    return min_ms + @as(i64, @intCast(value % range));
 }
 
 fn ensurePlayer(
@@ -674,10 +484,10 @@ fn loadFantasyPlayers(
 
     const state = shared.lock();
     defer shared.unlock();
-    try addFantasyPlayers(state, parsed.value.object.get("players").?.array.items, config.season_id);
+    try addFantasyPlayers(state, parsed.value.object.get("players").?.array.items);
 }
 
-fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value, season_id: i32) !void {
+fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value) !void {
     for (players) |player_value| {
         const item = player_value.object;
         const player = item.get("player").?.object;
@@ -688,52 +498,8 @@ fn addFantasyPlayers(state: *draft.State, players: []const std.json.Value, seaso
             positionName(position_id),
             @intCast(player.get("proTeamId").?.integer),
             @intCast(item.get("draftAuctionValue").?.integer),
-            projectedPoints(player, season_id),
         );
     }
-}
-
-fn projectedPoints(player: std.json.ObjectMap, season_id: i32) f64 {
-    const stats = player.get("stats") orelse return 0;
-    var compact_match: ?f64 = null;
-    for (stats.array.items) |stat_value| {
-        const stat = stat_value.object;
-        if (jsonInt(stat.get("statSourceId") orelse continue) != 1 or
-            jsonInt(stat.get("statSplitTypeId") orelse continue) != 0)
-        {
-            continue;
-        }
-        const applied_total = jsonFloat(stat.get("appliedTotal") orelse continue);
-        const record_season = stat.get("seasonId");
-        const scoring_period = stat.get("scoringPeriodId");
-        if (record_season != null and scoring_period != null and
-            jsonInt(record_season.?) == season_id and jsonInt(scoring_period.?) == 0)
-        {
-            return applied_total;
-        }
-        if (record_season == null and scoring_period == null) {
-            const external_id = stat.get("externalId") orelse continue;
-            if (jsonInt(external_id) == season_id) compact_match = applied_total;
-        }
-    }
-    return compact_match orelse 0;
-}
-
-fn jsonInt(value: std.json.Value) i64 {
-    return switch (value) {
-        .integer => |number| number,
-        .float => |number| @intFromFloat(number),
-        .string => |text| std.fmt.parseInt(i64, text, 10) catch unreachable,
-        else => unreachable,
-    };
-}
-
-fn jsonFloat(value: std.json.Value) f64 {
-    return switch (value) {
-        .integer => |number| @floatFromInt(number),
-        .float => |number| number,
-        else => unreachable,
-    };
 }
 
 fn ensureNominatedPlayer(
