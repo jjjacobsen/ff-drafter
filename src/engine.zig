@@ -2,8 +2,10 @@ const std = @import("std");
 const draft = @import("draft.zig");
 
 const baseline_discount = 4;
-const budget_gap_threshold = 10;
-const budget_adjustment_step = 5;
+const budget_gap_threshold = 20;
+const budget_adjustment_step = 10;
+const espn_value_adjustment = 4;
+const above_espn_gap_threshold = 90;
 const flex_penalty = 2;
 const bench_penalty = 4;
 const scarce_bench_penalty = 8;
@@ -95,7 +97,15 @@ fn budgetAdjustment(state: *const draft.State, user_team: *const draft.Team) i32
     const average = @divFloor(other_budgets, @as(i64, @intCast(state.teams.items.len - 1)));
     const gap = @as(i64, user_team.remaining_budget) - average;
     if (gap <= budget_gap_threshold) return 0;
-    return @intCast(@divFloor(gap - budget_gap_threshold + budget_adjustment_step - 1, budget_adjustment_step));
+
+    const catch_up = @min(
+        @divFloor(gap - budget_gap_threshold, budget_adjustment_step),
+        espn_value_adjustment,
+    );
+    if (gap <= above_espn_gap_threshold) return @intCast(catch_up);
+
+    return espn_value_adjustment +
+        @as(i32, @intCast(@divFloor(gap - above_espn_gap_threshold + budget_adjustment_step - 1, budget_adjustment_step)));
 }
 
 fn hasOpenDirectStarterSlot(

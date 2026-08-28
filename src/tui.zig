@@ -211,7 +211,28 @@ pub fn run(
         &loop,
         config,
     });
-    var artwork_worker = try init.io.concurrent(espn.runArtwork, .{
+    var artwork_worker_1 = try init.io.concurrent(espn.runArtwork, .{
+        init.io,
+        allocator,
+        shared,
+        &loop,
+        config,
+    });
+    var artwork_worker_2 = try init.io.concurrent(espn.runArtwork, .{
+        init.io,
+        allocator,
+        shared,
+        &loop,
+        config,
+    });
+    var artwork_worker_3 = try init.io.concurrent(espn.runArtwork, .{
+        init.io,
+        allocator,
+        shared,
+        &loop,
+        config,
+    });
+    var artwork_worker_4 = try init.io.concurrent(espn.runArtwork, .{
         init.io,
         allocator,
         shared,
@@ -222,7 +243,10 @@ pub fn run(
         shared.stop.store(true, .release);
         vx.exitAltScreen(tty.writer()) catch {};
         worker.await(init.io);
-        artwork_worker.await(init.io);
+        artwork_worker_1.await(init.io);
+        artwork_worker_2.await(init.io);
+        artwork_worker_3.await(init.io);
+        artwork_worker_4.await(init.io);
     }
 
     var app: App = .init(allocator, init.io, shared);

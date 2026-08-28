@@ -94,4 +94,4 @@ The decoded draft block restored its clock but discarded the integer between the
 
 ## 2026-08-27: Artwork requests blocked the draft command worker
 
-Team logos loaded before the WebSocket connection, and nominated-player artwork loaded on the WebSocket worker. A slow image host could delay a mid-draft connection or consume the final bidding seconds. A separate artwork worker now loads all optional images without blocking state updates or draft commands
+Team logos loaded before the WebSocket connection, and nominated-player artwork loaded on the WebSocket worker. Moving them to one background worker protected draft commands, but ten serial logo requests still made startup images slow. A four-worker artwork pool now loads optional images in parallel without blocking state updates or making every image wait for one slow host

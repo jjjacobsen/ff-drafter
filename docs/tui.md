@@ -86,7 +86,7 @@ An ESPN `ERROR` is a command-level response, not a disconnected socket. The work
 
 The WebSocket worker waits until the final eight seconds to bid. It waits one second after a counter bid. Nominations wait five seconds, or one second after the starting roster is full. Every action is checked against the current player, turn, roster, budget, and clock before the worker sends it
 
-The WebSocket and autonomous engine run in one worker. A separate artwork worker loads optional team logos and player images, so image requests cannot delay draft commands. The UI reads shared state under a mutex and receives Vaxis events when the state changes
+The WebSocket and autonomous engine run in one worker. A four-worker artwork pool loads optional team logos and player images in parallel, so image requests cannot delay draft commands or make all logos wait for one slow host. The UI reads shared state under a mutex and receives Vaxis events when the state changes
 
 See [Autonomous draft engine](engine.md) for the maximum bid formula and nomination rules
 

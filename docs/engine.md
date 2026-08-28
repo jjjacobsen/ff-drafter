@@ -30,13 +30,13 @@ The engine returns a zero maximum when no compatible roster slot remains
 
 The engine compares the user's remaining budget with the average remaining budget of all other teams
 
-The adjustment starts when the user has more than `$10` above that average. The engine adds `$1` to every maximum for each started `$5` above the threshold
+The maximum stays at its baseline until the user has more than `$20` above that average. After that, each complete `$10` of additional gap adds `$1` to the maximum
 
-```text
-budget adjustment = ceil((user budget - other-team average - $10) / $5)
-```
+The adjustment cannot take the maximum above the ESPN value while the budget gap is `$90` or less. This gives the engine a `$30` plateau at the ESPN value after the adjustment removes the baseline `$4` discount
 
-This adjustment increases bid limits as other teams spend money. It prevents the engine from keeping too much money while the useful player pool becomes smaller
+When the gap is more than `$90`, each started `$10` above that threshold adds another `$1`. This is the only budget range that permits a maximum above the ESPN value
+
+This slower adjustment prevents early purchases by other teams from increasing the maximum too quickly. It still prevents the engine from keeping too much money when the budget difference becomes dramatic
 
 ### Legal limit
 
