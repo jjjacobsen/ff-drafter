@@ -38,9 +38,9 @@ A player has no extra roster penalty while the user has an open starter slot for
 
 When only an open flex slot can start the player, the engine subtracts another `$2`. For example, a running back has this penalty after both RB slots are full while the flex slot remains open
 
-D/ST and K have a hard `$1` maximum. Any player who can only use the bench also has a hard `$1` maximum. This includes a backup QB
+While any priority starter slot is open, D/ST, K, and every player who can only use the bench have a hard `$1` maximum
 
-A starting QB uses the normal value algorithm but does not receive priority-starter spending pressure
+The one configured starting QB slot is part of the priority lineup. After it is filled, another QB is treated exactly like any other possible bench player
 
 The engine returns a zero maximum when no compatible roster slot remains
 
@@ -56,9 +56,9 @@ Roster penalties apply after the phase, player-value, and budget adjustments. Th
 
 ### Priority-starter spending plan
 
-The engine directs its discretionary budget to RB, WR, TE, and RB/WR/TE flex starter slots
+The engine directs its discretionary budget to the one starting QB slot and all RB, WR, TE, and RB/WR/TE flex starter slots
 
-It reserves `$10` for each open starting QB slot. It reserves `$1` for every other open non-priority slot, including D/ST, K, and bench slots
+It reserves `$1` for every open non-priority slot, including D/ST, K, and bench slots
 
 ```text
 priority budget = remaining budget - non-priority reserves
@@ -82,6 +82,20 @@ The engine takes the higher of the normal maximum and the limited spending targe
 
 This pressure has no effect early when good players already have normal maximums above the target. It becomes stronger as priority slots close and the remaining budget must fit into fewer important starters
 
+### Late roster spending plan
+
+After every priority starter slot is full, the engine releases the effective `$1` cap for the remaining roster plan
+
+It divides the complete remaining budget across all empty D/ST, K, and bench slots. A maximum-value assignment selects the best available legal player for every remaining slot. Only those planned players receive the late spending target, so less valuable alternatives retain the `$1` maximum
+
+```text
+late target per slot = remaining budget / all empty roster slots
+```
+
+The late target has no ESPN-value cap. It starts near `$1` or `$2` and rises when players are purchased cheaply or fewer slots remain. The final roster nomination uses the complete final target, limited by ESPN's legal maximum, so unused auction money has a place to go
+
+A QB can be selected for a bench slot during this phase, but it has no separate backup-QB rule
+
 ### Legal limit
 
 The engine reserves `$1` for every empty roster slot after the current purchase
@@ -102,12 +116,14 @@ After another team makes a counter bid, the engine waits one second before it bi
 
 ## Nominations
 
-When it is the user's turn, the engine waits five seconds before it nominates a player. After every starter slot is full, it waits one second instead
+When it is the user's turn, the engine waits five seconds before it nominates a player. After every priority starter slot is full, it waits one second instead
 
 The normal nomination strategy selects the highest ESPN-value player from a position with no compatible open starter slot. This sends valuable players that the user is less likely to need into the auction. If no starting position is filled, it nominates the available player with the highest ESPN value
 
 When the priority spending floor raises any planned player's maximum, the engine stops nominating decoys. It nominates the highest ESPN-value player in the priority plan with a `$1` opening bid
 
-When only one priority starter slot remains, the engine always nominates the best planned player. Its opening bid is the target per slot, limited by the player's final maximum. This gives the spending plan a way to use money even when no opponent raises the price
+When only one priority starter slot remains, the engine always nominates the best planned player. Its opening bid is the target per slot, limited by the player's final maximum
+
+The late roster plan uses the same nomination behavior. It nominates planned players when their late target raises the maximum, and the final roster nomination opens at the complete remaining target. This gives both spending plans a way to use money when no opponent raises the price
 
 A lower player ID resolves an equal ESPN value. The engine validates that the nominee is still available and that the user's roster and budget can accept the opening bid before it sends the nomination

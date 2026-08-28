@@ -499,7 +499,7 @@ fn runAutomation(
             if (remaining_ms <= 0) return;
 
             if (automation.nomination_pick_number != state.next_pick_number) {
-                const delay_ms: i64 = if (engine.startingRosterComplete(state)) 1_000 else 5_000;
+                const delay_ms: i64 = if (engine.priorityRosterComplete(state)) 1_000 else 5_000;
                 automation.nomination_pick_number = state.next_pick_number;
                 automation.nomination_due_ms = @min(
                     now_ms + delay_ms,

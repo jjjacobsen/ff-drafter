@@ -4,7 +4,6 @@ const draft = @import("draft.zig");
 const budget_gap_threshold = 20;
 const budget_adjustment_step = 10;
 const flex_penalty = 2;
-const starting_qb_reserve = 10;
 const impossible_cost: i64 = 1_000_000_000_000;
 
 pub const Decision = struct {
@@ -29,6 +28,7 @@ const CorePlan = struct {
     player_ids: []i32,
     open_slots: usize,
     target_per_slot: i32,
+    late_stage: bool,
 
     fn deinit(self: *const CorePlan) void {
         self.allocator.free(self.player_ids);
@@ -58,7 +58,7 @@ pub fn maxBid(state: *const draft.State, player_id: i32) i32 {
     const team_index = state.teamIndexById(state.user_team_id) orelse return 0;
     const team = &state.teams.items[team_index];
     const normal_max = normalMaxBid(state, team, &player);
-    if (normal_max == 0 or !isCorePosition(player.position)) return normal_max;
+    if (normal_max == 0) return normal_max;
 
     const plan = buildCorePlan(state, team) catch unreachable;
     defer plan.deinit();
@@ -113,11 +113,11 @@ pub fn chooseNomination(state: *const draft.State) ?Nomination {
     return .{ .player_id = player_id, .amount = 1 };
 }
 
-pub fn startingRosterComplete(state: *const draft.State) bool {
+pub fn priorityRosterComplete(state: *const draft.State) bool {
     const team_index = state.teamIndexById(state.user_team_id) orelse return false;
     const team = &state.teams.items[team_index];
     for (state.roster_slots.items, 0..) |slot_id, index| {
-        if (!isBenchSlot(slot_id) and rosterSlotOccurrenceOpen(state, team, index)) return false;
+        if (isCoreSlot(slot_id) and rosterSlotOccurrenceOpen(state, team, index)) return false;
     }
     return true;
 }
@@ -144,14 +144,17 @@ fn forcedMaxBid(
 ) i32 {
     if (!plan.contains(player_id)) return normal_max;
 
-    const cap = switch (plan.open_slots) {
+    const cap = if (plan.late_stage)
+        plan.target_per_slot
+    else switch (plan.open_slots) {
         0 => 0,
         1 => plan.target_per_slot,
         2 => player.estimated_price + 5,
         3 => player.estimated_price + 2,
         else => player.estimated_price,
     };
-    const forced_value = @min(plan.target_per_slot, cap) - rosterPenalty(state, team, player.position);
+    const penalty = if (plan.late_stage) 0 else rosterPenalty(state, team, player.position);
+    const forced_value = @min(plan.target_per_slot, cap) - penalty;
     return @max(normal_max, @min(@max(forced_value, 1), legalMax(state, team)));
 }
 
@@ -166,25 +169,26 @@ fn spendingPressureActive(state: *const draft.State, team: *const draft.Team, pl
 
 fn buildCorePlan(state: *const draft.State, team: *const draft.Team) !CorePlan {
     const allocator = state.allocator;
-    var open_slots: std.ArrayList(i32) = .empty;
-    defer open_slots.deinit(allocator);
-    var reserved_budget: i32 = 0;
+    var priority_slots: std.ArrayList(i32) = .empty;
+    defer priority_slots.deinit(allocator);
+    var remaining_slots: std.ArrayList(i32) = .empty;
+    defer remaining_slots.deinit(allocator);
 
     for (state.roster_slots.items, 0..) |slot_id, index| {
         if (!rosterSlotOccurrenceOpen(state, team, index)) continue;
-        if (isCoreSlot(slot_id)) {
-            try open_slots.append(allocator, slot_id);
-        } else {
-            reserved_budget += if (slot_id == 0 or slot_id == 1) starting_qb_reserve else 1;
-        }
+        try remaining_slots.append(allocator, slot_id);
+        if (isCoreSlot(slot_id)) try priority_slots.append(allocator, slot_id);
     }
 
+    const late_stage = priority_slots.items.len == 0;
+    const planning_slots = if (late_stage) remaining_slots.items else priority_slots.items;
     var candidates: std.ArrayList(Candidate) = .empty;
     defer candidates.deinit(allocator);
     var players = state.players.iterator();
     while (players.next()) |entry| {
         if (isPlayerDrafted(state, entry.key_ptr.*) or
-            !isCorePosition(entry.value_ptr.position))
+            (!late_stage and !isCorePosition(entry.value_ptr.position)) or
+            !fitsAnySlot(planning_slots, entry.value_ptr.position))
         {
             continue;
         }
@@ -196,7 +200,7 @@ fn buildCorePlan(state: *const draft.State, team: *const draft.Team) !CorePlan {
     }
     std.mem.sort(Candidate, candidates.items, {}, candidateIdOrder);
 
-    const assignment = try maximumValueAssignment(allocator, open_slots.items, candidates.items);
+    const assignment = try maximumValueAssignment(allocator, planning_slots, candidates.items);
     defer allocator.free(assignment);
     var player_ids: std.ArrayList(i32) = .empty;
     errdefer player_ids.deinit(allocator);
@@ -205,18 +209,23 @@ fn buildCorePlan(state: *const draft.State, team: *const draft.Team) !CorePlan {
             try player_ids.append(allocator, candidates.items[candidate_index].id);
     }
 
-    const target_per_slot = if (open_slots.items.len == 0)
+    const reserved_budget: i32 = if (late_stage)
+        0
+    else
+        @intCast(remaining_slots.items.len - priority_slots.items.len);
+    const target_per_slot = if (planning_slots.len == 0)
         0
     else
         @divFloor(
             @max(team.remaining_budget - reserved_budget, 0),
-            @as(i32, @intCast(open_slots.items.len)),
+            @as(i32, @intCast(planning_slots.len)),
         );
     return .{
         .allocator = allocator,
         .player_ids = try player_ids.toOwnedSlice(allocator),
-        .open_slots = open_slots.items.len,
+        .open_slots = planning_slots.len,
         .target_per_slot = target_per_slot,
+        .late_stage = late_stage,
     };
 }
 
@@ -412,15 +421,23 @@ fn rosterSlotOccurrenceOpen(state: *const draft.State, team: *const draft.Team, 
     return occupied <= occurrence;
 }
 
+fn fitsAnySlot(slots: []const i32, position: []const u8) bool {
+    for (slots) |slot_id| {
+        if (draft.slotAcceptsPosition(slot_id, position)) return true;
+    }
+    return false;
+}
+
 fn isCorePosition(position: []const u8) bool {
-    return std.mem.eql(u8, position, "RB") or
+    return std.mem.eql(u8, position, "QB") or
+        std.mem.eql(u8, position, "RB") or
         std.mem.eql(u8, position, "WR") or
         std.mem.eql(u8, position, "TE");
 }
 
 fn isCoreSlot(slot_id: i32) bool {
-    return slot_id == 2 or slot_id == 3 or slot_id == 4 or
-        slot_id == 5 or slot_id == 6 or slot_id == 23;
+    return slot_id == 0 or slot_id == 2 or slot_id == 3 or
+        slot_id == 4 or slot_id == 5 or slot_id == 6 or slot_id == 23;
 }
 
 fn isDirectSlot(slot_id: i32, position: []const u8) bool {
