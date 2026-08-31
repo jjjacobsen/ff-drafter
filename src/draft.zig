@@ -81,6 +81,7 @@ pub const State = struct {
     total_picks: usize = 0,
     next_pick_number: i32 = 1,
     recent_sale: ?RecentSale = null,
+    draft_start_real_ms: ?i64 = null,
 
     pub fn init(allocator: std.mem.Allocator, user_team_id: i32) !State {
         return .{

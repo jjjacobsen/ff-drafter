@@ -31,6 +31,7 @@ The top bar contains all teams in draft order. Each team box shows its name, ESP
 
 The center panel shows one of these states:
 
+- Before the scheduled start, a live `Draft starts in` countdown from ESPN's draft date
 - The nominated player, ESPN headshot or NFL team logo, position, ESPN auction value, current bid, leading team, time remaining, completed pick count, and engine maximum bid
 - The team that must nominate and its time remaining
 - A waiting message between auctions
@@ -57,7 +58,7 @@ Press `esc` or `q` to return to the main screen
 
 ## State synchronization
 
-The network worker first requests `draftInit` together with `kona_player_info`. This provides team names, roster slot counts, all NFL players, positions, and ESPN auction values
+The network worker first requests `draftInit` together with `kona_player_info`. This provides the scheduled draft date, team names, roster slot counts, all NFL players, positions, and ESPN auction values. The main screen shows the scheduled-start countdown while the worker connects or reconnects
 
 The worker then gets a temporary draft security token and joins the ESPN WebSocket room
 

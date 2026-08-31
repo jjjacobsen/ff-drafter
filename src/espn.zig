@@ -107,7 +107,7 @@ fn runWorker(
     while (!shared.shouldStop()) {
         loadCatalog(&http, allocator, shared, loop, config) catch |err| {
             try setError(shared, loop, .reconnecting, err);
-            try waitBeforeReconnect(io, shared);
+            try waitBeforeReconnect(io, shared, loop);
             continue;
         };
         break;
@@ -117,7 +117,7 @@ fn runWorker(
         runConnection(io, allocator, &http, shared, loop, config) catch |err| {
             if (shared.shouldStop()) return;
             try setError(shared, loop, .reconnecting, err);
-            try waitBeforeReconnect(io, shared);
+            try waitBeforeReconnect(io, shared, loop);
             continue;
         };
     }
@@ -151,7 +151,9 @@ fn loadCatalog(
     const root = parsed.value.object;
     const teams = root.get("teams").?.array.items;
     const players = root.get("players").?.array.items;
-    const lineup_slot_counts = root.get("settings").?.object
+    const settings = root.get("settings").?.object;
+    const draft_start_real_ms = settings.get("draftSettings").?.object.get("date").?.integer;
+    const lineup_slot_counts = settings
         .get("rosterSettings").?.object
         .get("lineupSlotCounts").?.object;
 
@@ -159,6 +161,7 @@ fn loadCatalog(
         const state = shared.lock();
         defer shared.unlock();
 
+        state.draft_start_real_ms = draft_start_real_ms;
         state.resetRosterSlots();
         for (roster_slot_order) |slot_id| {
             var slot_buffer: [8]u8 = undefined;
@@ -817,10 +820,11 @@ fn reportError(shared: *draft.Shared, loop: *events.Loop, err: anyerror) void {
     setError(shared, loop, .reconnecting, err) catch unreachable;
 }
 
-fn waitBeforeReconnect(io: std.Io, shared: *const draft.Shared) !void {
+fn waitBeforeReconnect(io: std.Io, shared: *const draft.Shared, loop: *events.Loop) !void {
     var elapsed: u8 = 0;
     while (elapsed < 30 and !shared.shouldStop()) : (elapsed += 1) {
         try io.sleep(.fromMilliseconds(100), .awake);
+        if (elapsed % 10 == 9) _ = try loop.tryPostEvent(.tick);
     }
 }
 

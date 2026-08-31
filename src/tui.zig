@@ -287,16 +287,17 @@ fn drawMain(
     window: vaxis.Window,
     frame_allocator: std.mem.Allocator,
 ) void {
-    const now_ms = std.Io.Timestamp.now(app.io, .awake).toMilliseconds();
+    const now_awake_ms = std.Io.Timestamp.now(app.io, .awake).toMilliseconds();
+    const now_real_ms = std.Io.Timestamp.now(app.io, .real).toMilliseconds();
     drawTeamBar(state, &app.team_images, app.focused_team_id, window.child(.{
         .height = 11,
-    }), frame_allocator, now_ms);
+    }), frame_allocator, now_awake_ms);
 
     const content = window.child(.{
         .y_off = 12,
         .height = window.height -| 15,
     });
-    drawAuction(state, app.player_image, now_ms, content, frame_allocator);
+    drawAuction(state, app.player_image, now_awake_ms, now_real_ms, content, frame_allocator);
     drawFooter(state, window);
 }
 
@@ -421,7 +422,8 @@ fn drawTeamBar(
 fn drawAuction(
     state: *const draft.State,
     player_image: ?PlayerImage,
-    now_ms: i64,
+    now_awake_ms: i64,
+    now_real_ms: i64,
     window: vaxis.Window,
     frame_allocator: std.mem.Allocator,
 ) void {
@@ -447,6 +449,15 @@ fn drawAuction(
             .col_offset = content.width -| @as(u16, @intCast(progress.len)),
             .wrap = .none,
         });
+    }
+
+    if (state.draft_start_real_ms) |start_ms| {
+        if (start_ms > now_real_ms) {
+            printCentered(content, 3, "Draft starts in", heading);
+            printCentered(content, 6, formatClock(frame_allocator, start_ms - now_real_ms), clock);
+            printCentered(content, 9, state.status_message, statusStyle(state.status));
+            return;
+        }
     }
 
     if (state.auction.player_id) |player_id| {
@@ -505,7 +516,7 @@ fn drawAuction(
 
         drawBudgetComparison(state, content, frame_allocator);
 
-        const remaining = state.clockRemainingMs(now_ms);
+        const remaining = state.clockRemainingMs(now_awake_ms);
         const clock_text = formatClock(frame_allocator, remaining);
         printCentered(content, 9, clock_text, clock);
         return;
@@ -514,7 +525,7 @@ fn drawAuction(
     if (state.auction.nomination_team_id) |team_id| {
         printCentered(content, 2, "Waiting for nomination", heading);
         printCentered(content, 4, teamName(state, team_id) orelse "Unknown team", accent);
-        const remaining = state.clockRemainingMs(now_ms);
+        const remaining = state.clockRemainingMs(now_awake_ms);
         printCentered(content, 7, formatClock(frame_allocator, remaining), clock);
         return;
     }
