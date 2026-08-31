@@ -84,8 +84,6 @@ The engine takes the higher of the normal maximum and the limited spending targe
 
 The priority lineup has an ESPN-value quality goal of `$20` for RB, WR, TE, and FLEX players. When a planned skill player is worth `$18` through `$20`, the forcing cap is at least ESPN value `+$3`. This pressure starts when the available player tier approaches the quality floor, before the engine must settle for a much lower-value final starter. QB does not use this quality-floor rule
 
-When spending pressure changes a planned maximum, nominations select the highest ESPN-value player whose maximum was actually raised. This directs nomination turns to the players that the forcing rule is trying to secure
-
 The remaining pressure has no effect early when good players already have normal maximums above the target. It becomes stronger as priority slots close and the remaining budget must fit into fewer important starters
 
 ### Late roster spending plan
@@ -100,7 +98,7 @@ A planned player's late maximum is the higher of the per-slot spending target an
 late target per slot = remaining budget / all empty roster slots
 ```
 
-The per-slot target starts near `$1` or `$2` and rises when players are purchased cheaply or fewer slots remain. The dynamic value side lets a `$17` player retain a much higher maximum than that target when the budget can legally support it. The final roster nomination uses the complete final target, limited by ESPN's legal maximum, so unused auction money has a place to go
+The per-slot target starts near `$1` or `$2` and rises when players are purchased cheaply or fewer slots remain. The dynamic value side lets a `$17` player retain a much higher maximum than that target when the budget can legally support it
 
 A QB can be selected for a bench slot during this phase, but it has no separate backup-QB rule
 
@@ -128,10 +126,6 @@ When it is the user's turn, the engine waits five seconds before it nominates a 
 
 The normal nomination strategy selects the highest ESPN-value player from a position with no compatible open starter slot. This sends valuable players that the user is less likely to need into the auction. If no starting position is filled, it nominates the available player with the highest ESPN value
 
-When the priority spending floor raises any planned player's maximum, the engine stops nominating decoys. It nominates the highest ESPN-value player in the priority plan with a `$1` opening bid
-
-When only one priority starter slot remains, the engine always nominates the best planned player. Its opening bid is the target per slot, limited by the player's final maximum
-
-The late roster plan uses the same nomination behavior. It nominates planned players when their late target raises the maximum, and the final roster nomination opens at the complete remaining target. This gives both spending plans a way to use money when no opponent raises the price
+All nominations use this strategy and a `$1` opening bid. The priority and late roster spending plans only change bidding maximums. They do not change nomination selection or opening bids
 
 A lower player ID resolves an equal ESPN value. The engine validates that the nominee is still available and that the user's roster and budget can accept the opening bid before it sends the nomination

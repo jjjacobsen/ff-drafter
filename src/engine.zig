@@ -72,30 +72,6 @@ pub fn maxBid(state: *const draft.State, player_id: i32) i32 {
 pub fn chooseNomination(state: *const draft.State) ?Nomination {
     const team_index = state.teamIndexById(state.user_team_id) orelse return null;
     const team = &state.teams.items[team_index];
-    const plan = buildCorePlan(state, team) catch unreachable;
-    defer plan.deinit();
-
-    const pressure_player_id = bestPressurePlayer(state, team, &plan);
-    if (plan.player_ids.len > 0 and (plan.open_slots == 1 or pressure_player_id != null)) {
-        const player_id = if (plan.open_slots == 1)
-            bestPlannedPlayer(state, &plan)
-        else
-            pressure_player_id.?;
-        const player = state.players.get(player_id).?;
-        const maximum = forcedMaxBid(
-            state,
-            team,
-            player_id,
-            &player,
-            normalMaxBid(state, team, &player),
-            &plan,
-        );
-        const amount = if (plan.open_slots == 1)
-            @max(@min(plan.target_per_slot, maximum), 1)
-        else
-            1;
-        return .{ .player_id = player_id, .amount = amount };
-    }
 
     var filled_choice: ?i32 = null;
     var fallback_choice: ?i32 = null;
@@ -175,21 +151,6 @@ fn forcedMaxBid(
         @min(plan.target_per_slot, cap);
     const forced_value = planned_value - penalty;
     return @max(normal_max, @min(@max(forced_value, 1), legalMax(state, team)));
-}
-
-fn bestPressurePlayer(
-    state: *const draft.State,
-    team: *const draft.Team,
-    plan: *const CorePlan,
-) ?i32 {
-    var best_id: ?i32 = null;
-    for (plan.player_ids) |player_id| {
-        const player = state.players.get(player_id).?;
-        const normal_max = normalMaxBid(state, team, &player);
-        if (forcedMaxBid(state, team, player_id, &player, normal_max, plan) <= normal_max) continue;
-        if (betterNominee(state, player_id, best_id)) best_id = player_id;
-    }
-    return best_id;
 }
 
 fn isQualityPressurePlayer(player: *const draft.Player) bool {
@@ -346,14 +307,6 @@ fn maximumValueAssignment(
         if (matched_row[column] != 0) result[matched_row[column] - 1] = column - 1;
     }
     return result;
-}
-
-fn bestPlannedPlayer(state: *const draft.State, plan: *const CorePlan) i32 {
-    var best_id: ?i32 = null;
-    for (plan.player_ids) |player_id| {
-        if (betterNominee(state, player_id, best_id)) best_id = player_id;
-    }
-    return best_id.?;
 }
 
 fn candidateIdOrder(_: void, left: Candidate, right: Candidate) bool {
